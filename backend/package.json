@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.test.json"
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "eval:ai-writing": "tsx scripts/eval-ai-writing.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
