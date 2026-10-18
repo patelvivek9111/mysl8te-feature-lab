@@ -9,7 +9,7 @@
 
 ## Mission Objective
 
-Build a production-grade standalone system that reproduces the accessible, observable functionality of Canvas DocViewer, Canvas SpeedGrader, and Turnitin Similarity Detection with complete verification evidence.
+Build a production-grade standalone system that reproduces the accessible, observable functionality of Canvas DocViewer, Canvas SpeedGrader, Turnitin-style similarity detection, and an independently evaluated AI-writing / AI-paraphrasing assessment, with complete verification evidence.
 
 **This is NOT a prototype. This is NOT a mockup. This is a real, functioning system.**
 
@@ -51,14 +51,17 @@ Independent plagiarism similarity detection:
 - Report generation
 - Must disclose differences from Turnitin
 
-### 4. Academic Integrity Guidance - APPROVED ✅
-Pedagogical tools (replaces AI detection):
-- Assignment design guidance
-- Process documentation tools
-- Educational resources
-- Red flag indicators (not detection)
+### 4. AI-Writing and AI-Paraphrasing Assessment - RESTORED (EXPERIMENTAL, evidence-gated) ✅
+Restored by the product owner on 2026-10-18 (supersedes ADR-001's cancellation; see ADR-009):
+- Independent, interpretable signal analysis; never presented as proof or as an "AI %"
+- Uncertainty interval on every result; insufficient-text and unsupported-language states
+- Teacher-only by default; mandatory human review decision and note
+- Evaluation harness + release gates (`docs/evaluations/AI_WRITING_RELEASE_GATES.md`); stays EXPERIMENTAL until gates pass on independent data
+- No Turnitin equivalence or accuracy claims without measured evidence
 
-**AI Writing Detection: CANCELLED** - Research showed 43% accuracy, bias concerns, liability risks
+### 5. Academic Integrity Guidance - APPROVED ✅
+Pedagogical tools that complement (not replace) the assessment:
+- Assignment design guidance, process documentation, educational resources
 
 ---
 
@@ -118,10 +121,9 @@ Each format requires: upload, preview, text extraction, annotation support, simi
 - State management: React Context + Hooks
 
 ### Backend
-- Node.js 24.22.0 + Express 4.18.2 + TypeScript 5.3.3
-- Database: PostgreSQL 16+
-- Job Queue: BullMQ + Redis
-- WebSocket: Socket.io
+- Node.js 22.13+/24 + Express 4 + TypeScript 5
+- Database: SQLite via built-in `node:sqlite` (ADR-008; PostgreSQL remains a future scaling option)
+- Processing: synchronous in-request for now; background workers deferred until benchmarks require them
 
 ### Document Processing
 - PDF: pdf-lib, pdfjs-dist
@@ -136,7 +138,7 @@ Each format requires: upload, preview, text extraction, annotation support, simi
 - Vector search: pgvector (if needed)
 
 ### Testing
-- Unit: Jest
+- Unit/API: Vitest + Supertest
 - E2E: Playwright 1.64.1
 - API: Supertest
 - Computer-use: Cursor agents
@@ -184,11 +186,12 @@ Each format requires: upload, preview, text extraction, annotation support, simi
 - [ ] Exclusion rules
 - [ ] Report generation
 
-### ⏳ Milestone F - Academic Integrity Guidance (Replaces AI Detection)
+### ⏳ Milestone F - AI-Writing Assessment (experimental, evidence-gated) + Integrity Guidance
+- [ ] Signal analysis module with uncertainty + safeguards
+- [ ] Evaluation harness and release gates
+- [ ] Teacher-only UI with mandatory human review
+- [ ] Independent labeled evaluation dataset (BLOCKED: needs owner-provided data)
 - [ ] Assignment design guidance
-- [ ] Process documentation tools
-- [ ] Educational resources
-- [ ] Red flag indicators
 
 ### ⏳ Milestone G - Full-System Integration
 - [ ] Module integration

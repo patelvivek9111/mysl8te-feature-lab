@@ -83,6 +83,12 @@ describe('authentication', () => {
     expect((await request(app).post('/api/auth/register').send({ email: 'y@school.test', name: 'S', password: 'longenough', role: 'admin' })).status).toBe(400);
   });
 
+  it('does not trim passwords', async () => {
+    await request(app).post('/api/auth/register').send({ email: 'sp@school.test', name: 'Sp', password: '  spaced pass  ' });
+    expect((await request(app).post('/api/auth/login').send({ email: 'sp@school.test', password: 'spaced pass' })).status).toBe(401);
+    expect((await request(app).post('/api/auth/login').send({ email: 'sp@school.test', password: '  spaced pass  ' })).status).toBe(200);
+  });
+
   it('rate-limits repeated failed logins', async () => {
     await register('Rae', 'student');
     let last = 0;

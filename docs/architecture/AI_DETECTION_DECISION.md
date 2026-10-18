@@ -3,7 +3,7 @@
 **Date**: 2026-10-18  
 **Decision Authority**: Agent 0 - Lead Orchestrator  
 **Based On**: Comprehensive research by [Agent 2](bc-de66aad3-a309-5d9d-ba1c-0fc63ef83a4c)  
-**Status**: ARCHITECTURE REVISED
+**Status**: SUPERSEDED by DECISIONS.md ADR-009 (2026-10-18). The research below is retained as risk evidence that informs the experimental feature's safeguards and release gates.
 
 ---
 

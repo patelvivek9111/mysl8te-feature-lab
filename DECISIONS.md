@@ -8,7 +8,7 @@
 ## ADR-001: Remove AI Writing Detection from Scope
 
 **Date**: 2026-10-18  
-**Status**: ACCEPTED  
+**Status**: SUPERSEDED by ADR-009 (product owner restored the workstream)  
 **Decision**: Do not build AI writing detection feature  
 **Context**: Comprehensive research by Agent 2 on Turnitin AI detection
 
@@ -54,7 +54,7 @@ Replace with **Academic Integrity Guidance System** (pedagogical tools, not dete
 ## ADR-002: PostgreSQL as Primary Database
 
 **Date**: 2026-10-18  
-**Status**: ACCEPTED  
+**Status**: SUPERSEDED by ADR-008 for the current release (Postgres was never provisioned or run)  
 **Decision**: Use PostgreSQL 16+ as primary database
 
 ### Context
@@ -226,6 +226,41 @@ Build **independent implementation** using:
 1. Claim identical to Turnitin - **Rejected** (false, unethical)
 2. Reverse engineer Turnitin - **Rejected** (likely illegal, definitely unethical)
 3. Skip similarity detection - **Rejected** (core feature)
+
+---
+
+## ADR-008: SQLite (node:sqlite) for Persistence
+
+**Date**: 2026-10-18  
+**Status**: ACCEPTED
+
+### Context
+The Prisma/PostgreSQL schema from B1 was never executed: no PostgreSQL or Docker exists in the Cloud Agent environment, and the B2 upload route depending on it had no tests.
+
+### Decision
+Use SQLite through Node's built-in `node:sqlite` (`backend/src/db/database.ts`) with versioned SQL migrations, foreign keys, and WAL mode. Zero external services; the database file lives in `backend/data/` (git-ignored).
+
+### Consequences
+- Standalone app and all tests run anywhere Node 22.13+ runs; integration tests use `:memory:`.
+- Single-writer concurrency limits; acceptable for the lab, revisit with benchmarks (Milestone H). SQL is kept portable so a PostgreSQL adapter remains possible.
+- `node:sqlite` prints an ExperimentalWarning on Node 22/24.
+
+---
+
+## ADR-009: Restore AI-Writing Assessment as an Evidence-Gated Workstream
+
+**Date**: 2026-10-18  
+**Status**: ACCEPTED (owner directive; supersedes ADR-001)
+
+### Decision
+Build an independent AI-writing and AI-paraphrasing assessment that produces interpretable signals with uncertainty, never accusations. It ships as EXPERIMENTAL and teacher-only: students never see results, every result carries safeguards, and a teacher must record a review decision with a note. Promotion to VALIDATED requires passing the release gates in `docs/evaluations/AI_WRITING_RELEASE_GATES.md` on an independent labeled dataset.
+
+### Rationale
+The research in ADR-001 remains valid evidence about risk; it now shapes the safeguards and release gates instead of cancelling the feature.
+
+### Consequences
+- No accuracy or Turnitin-equivalence claims until an evaluation report passes the gates.
+- An independent labeled dataset is required (BLOCKERS.md BLOCKER-002).
 
 ---
 

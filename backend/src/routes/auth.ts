@@ -26,7 +26,7 @@ router.post('/register', ah((req, res) => {
   const email = str(req.body?.email, 'email', { max: 254 }).toLowerCase();
   if (!EMAIL_RE.test(email)) throw badRequest('email is invalid');
   const name = str(req.body?.name, 'name', { min: 1, max: 120 });
-  const password = str(req.body?.password, 'password', { min: 8, max: 200 });
+  const password = str(req.body?.password, 'password', { min: 8, max: 200, trim: false });
   const role = (req.body?.role ?? 'student') as Role;
   if (role !== 'teacher' && role !== 'student') throw badRequest('role must be teacher or student');
   const exists = req.db.prepare('SELECT 1 FROM users WHERE email = ?').get(email);
@@ -41,7 +41,7 @@ router.post('/register', ah((req, res) => {
 
 router.post('/login', ah((req, res) => {
   const email = str(req.body?.email, 'email', { max: 254 }).toLowerCase();
-  const password = str(req.body?.password, 'password', { max: 200 });
+  const password = str(req.body?.password, 'password', { max: 200, trim: false });
   const key = `${req.ip}|${email}`;
   if (!checkLoginRateLimit(key)) throw new HttpError(429, 'Too many login attempts. Try again later.');
   const user = req.db.prepare('SELECT id, email, name, role, password_hash FROM users WHERE email = ?').get(email) as
