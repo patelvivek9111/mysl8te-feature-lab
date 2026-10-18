@@ -1,0 +1,11 @@
+{
+  "name": "mysl8te-feature-lab",
+  "description": "MySL8TE Feature Lab - Reverse Engineering Research Environment",
+  "setup": "bash .cursor/setup.sh",
+  "repos": [
+    {
+      "url": "https://github.com/patelvivek9111/mysl8te-feature-lab.git",
+      "ref": "cursor/environment-bootstrap-c2b0"
+    }
+  ]
+}

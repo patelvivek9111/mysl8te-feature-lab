@@ -50,6 +50,12 @@ app.delete('/api/notes', (req: Request, res: Response) => {
   res.json({ notes, message: 'All notes cleared' });
 });
 
+app.post('/api/test/reset', (req: Request, res: Response) => {
+  counter = 0;
+  notes = [];
+  res.json({ counter, notes, message: 'Test state reset' });
+});
+
 app.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
