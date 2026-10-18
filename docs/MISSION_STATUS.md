@@ -25,22 +25,70 @@ Build a production-grade standalone system reproducing Canvas DocViewer, SpeedGr
 ## Active Work
 
 ### Currently In Progress
+
 1. **Mission Architecture Initialization** (Agent 0)
-   - Status: IN PROGRESS
-   - Started: 2026-10-18 17:52 UTC
+   - Status: ✅ COMPLETE
+   - Completed: 2026-10-18
    - Tasks:
      - [x] Directory structure created
      - [x] TODO system established
      - [x] Model routing documented
-     - [ ] Research framework setup
-     - [ ] Agent deployment plan
-     - [ ] Documentation templates
+     - [x] Research framework setup
+     - [x] Agent deployment plan
+     - [x] Documentation templates
+   - Deliverables:
+     - Architecture document with full system design
+     - Feature parity tracking matrix
+     - Format compatibility matrix
+     - Known limitations documentation
+     - Bootstrap validation report
+     - Model routing strategy
+     - Mission status tracking
+   - PR: #2 (Draft) - Architecture & Research Launch
 
-### Next Up
-2. **Bootstrap Tools Validation**
-3. **Canvas Research (REA)**
-4. **Turnitin Research (REA)**
-5. **Architecture Design**
+2. **Canvas DocViewer & SpeedGrader Research** (Agent 1)
+   - Status: 🔄 RUNNING IN BACKGROUND
+   - Agent ID: bc-cccd97ca-d324-5533-8188-09d10c5d89d8
+   - Model: generalPurpose (inherit)
+   - Started: 2026-10-18
+   - Tasks:
+     - [ ] Investigate Canvas DocViewer features
+     - [ ] Investigate Canvas SpeedGrader workflows
+     - [ ] Document observable behaviors
+     - [ ] Update research inventory
+     - [ ] Update feature parity matrix
+   - Expected Deliverables:
+     - CANVAS_DOCVIEWER_RESEARCH.md
+     - CANVAS_SPEEDGRADER_RESEARCH.md
+     - CANVAS_EVIDENCE.md
+     - Updated RESEARCH_INVENTORY.md
+     - Updated FEATURE_PARITY_MATRIX.md
+
+3. **Turnitin Similarity & AI Detection Research** (Agent 2)
+   - Status: 🔄 RUNNING IN BACKGROUND
+   - Agent ID: bc-de66aad3-a309-5d9d-ba1c-0fc63ef83a4c
+   - Model: generalPurpose (inherit)
+   - Started: 2026-10-18
+   - Tasks:
+     - [ ] Investigate Turnitin Similarity Detection
+     - [ ] Investigate Turnitin AI Writing Detection
+     - [ ] Identify proprietary vs. observable components
+     - [ ] Propose independent implementation approaches
+     - [ ] Document ethical considerations
+     - [ ] Update research inventory
+     - [ ] Update feature parity matrix
+     - [ ] Update known limitations
+   - Expected Deliverables:
+     - TURNITIN_SIMILARITY_RESEARCH.md
+     - TURNITIN_AI_DETECTION_RESEARCH.md
+     - TURNITIN_EVIDENCE.md
+     - Updated RESEARCH_INVENTORY.md
+     - Updated FEATURE_PARITY_MATRIX.md
+     - Updated KNOWN_LIMITATIONS.md
+
+### Next Up (After Research Complete)
+4. **Architecture Refinement** (based on research findings)
+5. **Universal Document Engine Implementation** (Milestone B)
 
 ---
 
