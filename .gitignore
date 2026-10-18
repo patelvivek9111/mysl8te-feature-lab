@@ -1,0 +1,9 @@
+rea-tool/
+ghidra.zip
+*.zip
+node_modules/
+dist/
+.cache/
+test-results/
+playwright-report/
+playwright/.cache/
