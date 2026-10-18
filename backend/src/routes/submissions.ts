@@ -359,7 +359,10 @@ function isGradePublished(db: DB, submissionId: string): boolean {
 export function submissionDetail(db: DB, access: SubmissionAccess, userId: string) {
   const s = access.submission;
   const doc = db.prepare('SELECT id, original_name, mime, format, size, page_count, text, html, extraction_status, extraction_error, created_at FROM documents WHERE id = ?')
-    .get(s.document_id) as Record<string, unknown>;
+    .get(s.document_id) as unknown as {
+      id: string; original_name: string; mime: string; format: string; size: number; page_count: number | null; text: string | null;
+      html: string | null; extraction_status: string; extraction_error: string | null; created_at: string;
+    };
   const student = db.prepare('SELECT id, name FROM users WHERE id = ?').get(s.student_id);
   const attempts = db.prepare('SELECT id, attempt, submitted_at AS submittedAt FROM submissions WHERE assignment_id = ? AND student_id = ? ORDER BY attempt').all(s.assignment_id, s.student_id);
   return {
