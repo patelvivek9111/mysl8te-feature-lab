@@ -314,12 +314,61 @@ describe('similarity and AI-writing assessment', () => {
   });
 });
 
+describe('security review regressions', () => {
+  it('re-hides teacher feedback when a grade is unpublished', async () => {
+    const { teacher, alice, assignmentId } = await setupCourse();
+    const id = (await submit(alice.token, assignmentId, Buffer.from(ESSAY), 'a.txt')).body.submission.id;
+    await request(app).post(`/api/submissions/${id}/annotations`).set(auth(teacher.token)).send({ type: 'point', page: 1, coords: { x: 0.1, y: 0.1 }, content: 'note' });
+    await request(app).post(`/api/submissions/${id}/comments`).set(auth(teacher.token)).send({ body: 'teacher comment' });
+    await request(app).put(`/api/submissions/${id}/grade`).set(auth(teacher.token)).send({ score: 10 });
+    await request(app).post(`/api/submissions/${id}/grade/publish`).set(auth(teacher.token));
+    await request(app).post(`/api/submissions/${id}/comments`).set(auth(alice.token)).send({ body: 'student question' });
+    await request(app).post(`/api/submissions/${id}/grade/unpublish`).set(auth(teacher.token));
+    const view = await request(app).get(`/api/submissions/${id}`).set(auth(alice.token));
+    expect(view.body.grade).toBeNull();
+    expect(view.body.annotations).toHaveLength(0);
+    expect(view.body.comments.map((c: { body: string }) => c.body)).toEqual(['student question']);
+    expect(view.body.submission.status).toBe('submitted');
+  });
+
+  it('prevents co-teachers from demoting the owner or other teachers', async () => {
+    const { teacher, courseId } = await setupCourse();
+    const co = await register('Cole', 'teacher');
+    const other = await register('Olive', 'teacher');
+    for (const t of [co, other]) await request(app).post(`/api/courses/${courseId}/enrollments`).set(auth(teacher.token)).send({ email: t.email, role: 'teacher' });
+    expect((await request(app).post(`/api/courses/${courseId}/enrollments`).set(auth(co.token)).send({ email: teacher.email, role: 'student' })).status).toBe(403);
+    expect((await request(app).post(`/api/courses/${courseId}/enrollments`).set(auth(co.token)).send({ email: other.email, role: 'student' })).status).toBe(403);
+    expect((await request(app).post(`/api/courses/${courseId}/enrollments`).set(auth(teacher.token)).send({ email: other.email, role: 'student' })).status).toBe(201);
+  });
+
+  it('exports PDFs with very long unbroken words quickly', async () => {
+    const { alice, assignmentId } = await setupCourse();
+    const id = (await submit(alice.token, assignmentId, Buffer.from('x'.repeat(20000)), 'long.txt')).body.submission.id;
+    const started = Date.now();
+    const res = await request(app).get(`/api/submissions/${id}/export?format=pdf`).set(auth(alice.token)).buffer(true).parse(binaryParser as never);
+    expect(res.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it('rejects DOCX zip bombs before parsing', async () => {
+    const { alice, assignmentId } = await setupCourse();
+    const bomb = makeDocx(Array.from({ length: 300_000 }, () => 'a'));
+    const started = Date.now();
+    const res = await submit(alice.token, assignmentId, bomb, 'bomb.docx');
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(res.status).toBe(201);
+    expect(res.body.document.extractionStatus).toBe('failed');
+    expect(res.body.document.extractionNote).toMatch(/too large/);
+  });
+});
+
 describe('test reset endpoint', () => {
   it('seeds a demo dataset when enabled and is blocked when disabled', async () => {
-    const res = await request(app).post('/api/test/reset?seed=demo');
+    expect((await request(app).post('/api/test/reset')).status).toBe(403);
+    const res = await request(app).post('/api/test/reset?seed=demo').set('X-Requested-With', 'mysl8te');
     expect(res.status).toBe(200);
     expect(res.body.seeded.submissions.bob).toBeTruthy();
     const disabled = createApp({ db, uploadDir, allowTestReset: false });
-    expect((await request(disabled).post('/api/test/reset')).status).toBe(403);
+    expect((await request(disabled).post('/api/test/reset').set('X-Requested-With', 'mysl8te')).status).toBe(403);
   });
 });

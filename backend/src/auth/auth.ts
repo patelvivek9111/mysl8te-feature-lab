@@ -24,12 +24,15 @@ export function hashPassword(password: string): string {
   return `scrypt$${SCRYPT_PARAMS.N}$${SCRYPT_PARAMS.r}$${SCRYPT_PARAMS.p}$${salt.toString('base64')}$${hash.toString('base64')}`;
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+const scryptAsync = (password: string, salt: Buffer, keylen: number, opts: crypto.ScryptOptions) =>
+  new Promise<Buffer>((resolve, reject) => crypto.scrypt(password, salt, keylen, opts, (err, key) => (err ? reject(err) : resolve(key))));
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const parts = stored.split('$');
   if (parts.length !== 6 || parts[0] !== 'scrypt') return false;
   const [, N, r, p, saltB64, hashB64] = parts;
   const expected = Buffer.from(hashB64, 'base64');
-  const actual = crypto.scryptSync(password, Buffer.from(saltB64, 'base64'), expected.length, { N: Number(N), r: Number(r), p: Number(p) });
+  const actual = await scryptAsync(password, Buffer.from(saltB64, 'base64'), expected.length, { N: Number(N), r: Number(r), p: Number(p) });
   return crypto.timingSafeEqual(expected, actual);
 }
 
@@ -96,6 +99,9 @@ export function requireRole(req: Request, ...roles: Role[]): AuthUser {
 const attempts = new Map<string, { count: number; resetAt: number }>();
 export function checkLoginRateLimit(key: string, max = 10, windowMs = 15 * 60 * 1000): boolean {
   const now = Date.now();
+  if (attempts.size > 10_000) {
+    for (const [k, v] of attempts) if (v.resetAt < now) attempts.delete(k);
+  }
   const entry = attempts.get(key);
   if (!entry || entry.resetAt < now) {
     attempts.set(key, { count: 1, resetAt: now + windowMs });

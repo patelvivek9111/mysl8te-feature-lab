@@ -39,14 +39,14 @@ router.post('/register', ah((req, res) => {
   res.status(201).json({ user: { id, email, name, role }, token });
 }));
 
-router.post('/login', ah((req, res) => {
+router.post('/login', ah(async (req, res) => {
   const email = str(req.body?.email, 'email', { max: 254 }).toLowerCase();
   const password = str(req.body?.password, 'password', { max: 200, trim: false });
   const key = `${req.ip}|${email}`;
-  if (!checkLoginRateLimit(key)) throw new HttpError(429, 'Too many login attempts. Try again later.');
+  if (!checkLoginRateLimit(`ip:${req.ip}`, 100) || !checkLoginRateLimit(key)) throw new HttpError(429, 'Too many login attempts. Try again later.');
   const user = req.db.prepare('SELECT id, email, name, role, password_hash FROM users WHERE email = ?').get(email) as
     | { id: string; email: string; name: string; role: Role; password_hash: string } | undefined;
-  const ok = verifyPassword(password, user?.password_hash ?? DUMMY_HASH) && !!user;
+  const ok = (await verifyPassword(password, user?.password_hash ?? DUMMY_HASH)) && !!user;
   if (!ok || !user) throw unauthorized('Invalid email or password');
   clearLoginRateLimit(key);
   const { token, expiresAt } = createSession(req.db, user.id);

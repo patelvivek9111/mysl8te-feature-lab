@@ -88,11 +88,10 @@ export async function extractContent(buf: Buffer, format: DocumentFormat): Promi
     case 'PDF':
       return extractPdf(buf);
     case 'DOCX': {
-      const [{ value: text }, { value: html }] = await Promise.all([
-        mammoth.extractRawText({ buffer: buf }),
-        mammoth.convertToHtml({ buffer: buf }),
-      ]);
-      return { text: normalizeWhitespace(text), html: sanitizeHtml(html), pageCount: 1, status: 'completed' };
+      assertSafeZip(buf);
+      const { value } = await mammoth.convertToHtml({ buffer: buf });
+      const html = sanitizeHtml(value);
+      return { text: normalizeWhitespace(htmlToText(html)), html, pageCount: 1, status: 'completed' };
     }
     case 'HTML': {
       const raw = buf.toString('utf8');
@@ -155,20 +154,79 @@ export function textToHtml(text: string): string {
 }
 
 const ALLOWED_TAGS = new Set(['p', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'u', 's', 'sub', 'sup', 'blockquote', 'pre', 'code', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'hr', 'span', 'div']);
+const DROP_WITH_CONTENT = new Set(['script', 'style', 'iframe', 'object', 'embed', 'noscript', 'template', 'svg', 'math', 'head', 'textarea', 'title', 'xmp', 'noembed', 'noframes']);
+const VOID_TAGS = new Set(['br', 'hr']);
+const TAG_NAME = /^<(\/?)([a-zA-Z][a-zA-Z0-9]*)/;
 
-/** Allow-list sanitizer: keeps only structural tags and drops every attribute, script, style and embedded object. */
+/**
+ * Allow-list sanitizer: keeps only structural tags (re-emitted without attributes) and drops scripts, styles,
+ * embedded objects and comments. Single forward pass so runtime stays linear for adversarial input.
+ */
 export function sanitizeHtml(html: string): string {
-  let out = html.replace(/<!--[\s\S]*?-->/g, '');
-  out = out.replace(/<(script|style|iframe|object|embed|noscript|template|svg|math|head)\b[\s\S]*?<\/\1\s*>/gi, '');
-  out = out.replace(/<(script|style|iframe|object|embed|noscript|template|svg|math|head)\b[^>]*\/?>/gi, '');
-  out = out.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (tag, name: string) => {
-    const lower = name.toLowerCase();
-    if (!ALLOWED_TAGS.has(lower)) return '';
-    const closing = tag.startsWith('</');
-    if (closing) return `</${lower}>`;
-    return lower === 'br' || lower === 'hr' ? `<${lower}>` : `<${lower}>`;
-  });
-  return out.replace(/<(?![a-z/])/gi, '&lt;');
+  let out = '';
+  let i = 0;
+  let gt = -2;
+  const n = html.length;
+  while (i < n) {
+    const lt = html.indexOf('<', i);
+    if (lt === -1) { out += html.slice(i); break; }
+    out += html.slice(i, lt);
+    if (html.startsWith('<!--', lt)) {
+      const end = html.indexOf('-->', lt + 4);
+      if (end === -1) break;
+      i = end + 3;
+      continue;
+    }
+    if (gt !== -1 && gt <= lt) gt = html.indexOf('>', lt + 1);
+    if (gt === -1) { out += '&lt;' + html.slice(lt + 1).replace(/</g, '&lt;'); break; }
+    const m = TAG_NAME.exec(html.slice(lt, Math.min(gt + 1, lt + 64)));
+    if (!m) {
+      if (html[lt + 1] === '!' || html[lt + 1] === '?') { i = gt + 1; continue; }
+      out += '&lt;';
+      i = lt + 1;
+      continue;
+    }
+    const closing = m[1] === '/';
+    const name = m[2].toLowerCase();
+    i = gt + 1;
+    if (DROP_WITH_CONTENT.has(name)) {
+      if (closing) continue;
+      const closeRe = new RegExp(`</${name}\\s*>`, 'gi');
+      closeRe.lastIndex = i;
+      const close = closeRe.exec(html);
+      if (!close) break;
+      i = close.index + close[0].length;
+      continue;
+    }
+    if (!ALLOWED_TAGS.has(name)) continue;
+    if (closing) { if (!VOID_TAGS.has(name)) out += `</${name}>`; }
+    else out += `<${name}>`;
+  }
+  return out;
+}
+
+const MAX_DOCX_XML_BYTES = 6 * 1024 * 1024;
+const MAX_DOCX_TOTAL_BYTES = 60 * 1024 * 1024;
+
+/** Rejects zip bombs and oversized Word XML before mammoth inflates and parses everything in memory. */
+export function assertSafeZip(buf: Buffer): void {
+  const eocd = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  if (eocd === -1 || eocd + 22 > buf.length) throw new Error('Invalid DOCX archive');
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  let total = 0;
+  for (let k = 0; k < count; k++) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) throw new Error('Invalid DOCX archive');
+    const uncompressed = buf.readUInt32LE(p + 24);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
+    total += uncompressed;
+    if (name.endsWith('.xml') && uncompressed > MAX_DOCX_XML_BYTES) throw new Error(`document part ${name} is too large to process`);
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  if (total > MAX_DOCX_TOTAL_BYTES) throw new Error('document expands to more than 60 MB');
 }
 
 function htmlToText(html: string): string {

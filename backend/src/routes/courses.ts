@@ -86,6 +86,12 @@ router.post('/courses/:courseId/enrollments', ah((req, res) => {
   const target = req.db.prepare('SELECT id, role FROM users WHERE email = ?').get(email) as { id: string; role: string } | undefined;
   if (!target) throw notFound('No user with that email');
   if (role === 'teacher' && target.role === 'student') throw badRequest('Student accounts cannot be enrolled as teachers');
+  const course = req.db.prepare('SELECT owner_id FROM courses WHERE id = ?').get(courseId) as { owner_id: string };
+  const existing = req.db.prepare('SELECT role FROM enrollments WHERE course_id = ? AND user_id = ?').get(courseId, target.id) as { role: string } | undefined;
+  if (existing && existing.role !== role) {
+    if (target.id === course.owner_id) throw forbidden("The course owner's role cannot be changed");
+    if (existing.role === 'teacher' && user.id !== course.owner_id && user.role !== 'admin') throw forbidden('Only the course owner can change a teacher\'s role');
+  }
   req.db.prepare('INSERT INTO enrollments (course_id, user_id, role) VALUES (?, ?, ?) ON CONFLICT(course_id, user_id) DO UPDATE SET role = excluded.role').run(courseId, target.id, role);
   audit(req.db, user.id, 'enroll', 'course', courseId);
   res.status(201).json({ enrollment: { courseId, userId: target.id, role } });

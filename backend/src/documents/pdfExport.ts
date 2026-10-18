@@ -5,6 +5,8 @@ import type { submissionDetail } from '../routes/submissions';
 type Detail = ReturnType<typeof submissionDetail>;
 type Annotation = Detail['annotations'][number];
 
+const MAX_EXPORT_TEXT = 300_000;
+
 const TYPE_LABELS: Record<string, string> = {
   point: 'Point comment', highlight: 'Highlight', strikeout: 'Strikeout', area: 'Area comment', freedraw: 'Drawing', freetext: 'Text box',
 };
@@ -31,11 +33,16 @@ function wrap(text: string, font: PDFFont, size: number, width: number): string[
       else {
         if (line) lines.push(line);
         line = word;
-        while (font.widthOfTextAtSize(line, size) > width && line.length > 1) {
-          let cut = line.length - 1;
-          while (cut > 1 && font.widthOfTextAtSize(line.slice(0, cut), size) > width) cut--;
-          lines.push(line.slice(0, cut));
-          line = line.slice(cut);
+        while (line.length > 1 && font.widthOfTextAtSize(line, size) > width) {
+          let lo = 1;
+          let hi = Math.min(line.length - 1, 400);
+          while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1;
+            if (font.widthOfTextAtSize(line.slice(0, mid), size) <= width) lo = mid;
+            else hi = mid - 1;
+          }
+          lines.push(line.slice(0, lo));
+          line = line.slice(lo);
         }
       }
     }
@@ -132,7 +139,8 @@ export async function renderAnnotatedPdf(d: Detail, storagePath: string): Promis
     const w = new Writer(doc, font, bold);
     w.text(d.document.fileName, { size: 14, bold: true });
     w.gap();
-    w.text(d.document.text || '(No extractable text)');
+    const text = d.document.text || '(No extractable text)';
+    w.text(text.length > MAX_EXPORT_TEXT ? `${text.slice(0, MAX_EXPORT_TEXT)}\n\n[Text truncated at ${MAX_EXPORT_TEXT.toLocaleString('en-US')} characters]` : text);
   }
 
   const w = new Writer(doc, font, bold);

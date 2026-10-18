@@ -49,6 +49,10 @@ export function createApp(config: AppConfig) {
     if (process.env.NODE_ENV === 'production' || !config.allowTestReset) {
       return res.status(403).json({ error: 'Test reset endpoint is disabled' });
     }
+    const remote = req.socket.remoteAddress ?? '';
+    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote) || req.headers['x-requested-with'] !== 'mysl8te') {
+      return res.status(403).json({ error: 'Test reset requires a local request with the X-Requested-With: mysl8te header' });
+    }
     try {
       resetDatabase(config.db);
       resetRateLimits();

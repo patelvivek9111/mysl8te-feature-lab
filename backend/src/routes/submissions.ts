@@ -324,7 +324,12 @@ export function createSubmissionRouter(config: SubmissionRouterConfig): Router {
     const user = requireUser(req);
     const access = loadSubmission(req.db, user, param(req, 'submissionId'));
     requireGrader(access);
-    req.db.prepare("UPDATE grades SET status = 'draft', published_at = NULL WHERE submission_id = ?").run(access.submission.id);
+    transaction(req.db, () => {
+      req.db.prepare("UPDATE grades SET status = 'draft', published_at = NULL WHERE submission_id = ?").run(access.submission.id);
+      req.db.prepare('UPDATE annotations SET published = 0 WHERE submission_id = ?').run(access.submission.id);
+      req.db.prepare('UPDATE submission_comments SET published = 0 WHERE submission_id = ? AND author_id <> ?').run(access.submission.id, access.submission.student_id);
+      req.db.prepare("UPDATE submissions SET status = 'submitted' WHERE id = ?").run(access.submission.id);
+    });
     audit(req.db, user.id, 'unpublish_grade', 'submission', access.submission.id);
     res.json({ grade: visibleGrade(req.db, access) });
   }));

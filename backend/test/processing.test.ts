@@ -54,6 +54,22 @@ describe('extractContent', () => {
 });
 
 describe('sanitizeHtml', () => {
+  it('runs in linear time on adversarial input', () => {
+    for (const payload of ['<script '.repeat(30000), '<!--'.repeat(50000), '<x '.repeat(100000), '<script>'.repeat(30000), '<a'.repeat(100000) + '>']) {
+      const started = Date.now();
+      const out = sanitizeHtml(payload);
+      expect(Date.now() - started).toBeLessThan(500);
+      expect(out).not.toMatch(/<script/i);
+    }
+  });
+
+  it('escapes an unfinished trailing tag and keeps plain comparisons', () => {
+    expect(sanitizeHtml('<p>hi</p><img src=x onerror=alert(1)//')).toBe('<p>hi</p>&lt;img src=x onerror=alert(1)//');
+    expect(sanitizeHtml('<p>a < b and c > d</p>')).toBe('<p>a &lt; b and c > d</p>');
+    expect(sanitizeHtml('<scr<script>ipt>alert(1)</script>')).not.toMatch(/<script/i);
+    expect(sanitizeHtml('<P CLASS="x">Up</P><BR/>')).toBe('<p>Up</p><br>');
+  });
+
   it('strips scripts, event handlers, styles, links and unknown tags', () => {
     const dirty = '<p onclick="x()">Hi<script>alert(1)</script><img src=x onerror=alert(1)><a href="javascript:alert(1)">link</a><style>p{}</style><iframe src="//evil"></iframe></p>';
     const clean = sanitizeHtml(dirty);
