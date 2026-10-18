@@ -9,7 +9,7 @@ Agents launched are real Task-tool subagents (local, background) of the automati
 | Lead (automation run) | Backend core, integration, records, commits | `backend/src` (except below), root docs | Active |
 | Similarity detection engine | k-gram engine + tests + doc | `backend/src/similarity/`, `docs/evaluations/SIMILARITY_ENGINE.md` | Done (committed 9ea32b3) |
 | AI-writing assessment module | Signals, uncertainty, evaluation harness, gates doc | `backend/src/ai-writing/`, `backend/scripts/`, `backend/eval-data/`, `docs/evaluations/AI_WRITING_RELEASE_GATES.md` | Done (committed 16aa13a) |
-| Independent backend security review | Read-only review, reports findings | none (read-only) | Running |
+| Independent backend security review | Read-only review, reports findings | none (read-only) | Done (findings fixed in 0e7c3ca) |
 | Frontend app and Playwright E2E | All UI + E2E specs with video | `frontend/` | Running |
 
 ## Earlier agents (idle, work merged into this branch)

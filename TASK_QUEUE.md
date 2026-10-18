@@ -17,18 +17,19 @@ Status values: DONE (code + tests in repo) · IN PROGRESS · READY · BLOCKED. "
 | C-EXP | Feedback export: HTML + annotated PDF (markers burned on PDF pages) | `test/api.test.ts` parses exported PDF |
 | E3 | Similarity engine: full k-gram index, NEAR matches, exclusions, primary attribution (2k docs/~1M words: 400-557 ms one-shot) | `src/similarity/similarity.test.ts` (27) |
 | F1-F2 | AI-writing signals, uncertainty, evaluation harness, proposed release gates (status NOT VALIDATED, 0/6 gates) | `src/ai-writing/ai-writing.test.ts` (24) |
+| REVIEW-1 | Independent backend security review: 3 DoS, 2 medium, 3 low findings fixed with regression tests | commit 0e7c3ca, 77 backend tests |
+| E-PERF | Per-course cached similarity index with incremental sync | commit e5c9ddc |
 | E-SVC | Similarity service + routes (course-scoped corpus, exclusions, role-filtered excerpts) | `test/api.test.ts` similarity test |
 | F-SVC | AI-assessment routes: teacher-only, review decision + note required | `test/api.test.ts` AI test |
 
 ## In progress (this run's subagents; see AGENT_STATUS.md)
 | ID | Task | Owner |
 |----|------|-------|
-| REVIEW-1 | Independent read-only backend security review (findings to be fixed by lead) | subagent "Independent backend security review" |
 | C3/D4/G1 | Frontend: auth, dashboards, SpeedGrader, DocViewer tools, similarity + AI tabs, student view; Playwright E2E with video | subagent "Frontend app and Playwright E2E" |
 
 ## Ready (next, in priority order)
 1. **REVIEW-2** Independent review of the frontend after it lands; fix REVIEW-1 findings.
-1b. **E-PERF** Cache the similarity index per course instead of rebuilding per request (~400 ms per 1M corpus words).
+1b. **H-ISO** Remaining REVIEW-1 items: run extraction (pdfjs/mammoth) and similarity in a worker thread with time + memory limits; registration 409 email enumeration; enrollment-without-consent policy.
 2. **CI-1** GitHub Actions workflow: backend typecheck + vitest, frontend build + lint + Playwright (upload videos as artifacts).
 3. **H-PERF** Benchmarks: upload/extract latency for 1/10/25 MB PDFs, similarity with 2k-doc corpus via API, annotation list with 500 annotations.
 4. **B7** OCR for images/scanned PDFs (tesseract.js; needs npm + language data download) - currently images are view/annotate only.
