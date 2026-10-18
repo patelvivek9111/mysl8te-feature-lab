@@ -65,26 +65,34 @@ Build a production-grade standalone system reproducing Canvas DocViewer, SpeedGr
      - Updated FEATURE_PARITY_MATRIX.md
 
 3. **Turnitin Similarity & AI Detection Research** (Agent 2)
-   - Status: 🔄 RUNNING IN BACKGROUND
+   - Status: ✅ COMPLETE
    - Agent ID: bc-de66aad3-a309-5d9d-ba1c-0fc63ef83a4c
    - Model: generalPurpose (inherit)
    - Started: 2026-10-18
+   - Completed: 2026-10-18
    - Tasks:
-     - [ ] Investigate Turnitin Similarity Detection
-     - [ ] Investigate Turnitin AI Writing Detection
-     - [ ] Identify proprietary vs. observable components
-     - [ ] Propose independent implementation approaches
-     - [ ] Document ethical considerations
-     - [ ] Update research inventory
-     - [ ] Update feature parity matrix
-     - [ ] Update known limitations
-   - Expected Deliverables:
-     - TURNITIN_SIMILARITY_RESEARCH.md
-     - TURNITIN_AI_DETECTION_RESEARCH.md
-     - TURNITIN_EVIDENCE.md
-     - Updated RESEARCH_INVENTORY.md
-     - Updated FEATURE_PARITY_MATRIX.md
-     - Updated KNOWN_LIMITATIONS.md
+     - [x] Investigate Turnitin Similarity Detection
+     - [x] Investigate Turnitin AI Writing Detection
+     - [x] Identify proprietary vs. observable components
+     - [x] Propose independent implementation approaches
+     - [x] Document ethical considerations
+     - [x] Update research inventory
+     - [x] Update feature parity matrix
+     - [x] Update known limitations
+   - Deliverables:
+     - ✅ TURNITIN_SIMILARITY_RESEARCH.md (19 sections, comprehensive)
+     - ✅ TURNITIN_AI_DETECTION_RESEARCH.md (17 sections, with strong caution)
+     - ✅ TURNITIN_EVIDENCE.md (40+ sources documented)
+     - ✅ Updated RESEARCH_INVENTORY.md
+     - ✅ Updated FEATURE_PARITY_MATRIX.md
+     - ✅ Updated KNOWN_LIMITATIONS.md
+   - Key Findings:
+     - Similarity detection: Observable workflow documented, algorithm proprietary
+     - Formula: (Matching Words / Total Words) × 100
+     - 4 match groups, citation detection, exclusion filters documented
+     - Source corpus: 90B+ web, 170M+ publications, 1.2B+ student papers
+     - AI detection: 43% hybrid accuracy, 60% humanized AI accuracy (research)
+     - **Recommendation**: Consider NOT building AI detection due to limitations/risks
 
 ### Next Up (After Research Complete)
 4. **Architecture Refinement** (based on research findings)
@@ -124,15 +132,15 @@ Build a production-grade standalone system reproducing Canvas DocViewer, SpeedGr
 - [ ] Export functionality
 
 ### Turnitin
-- [ ] Similarity Report UI
-- [ ] Source matching behavior
-- [ ] Highlighting system
-- [ ] Exclusion controls
-- [ ] Percentage calculation
-- [ ] AI Writing Report
-- [ ] AI-generated detection
-- [ ] AI-paraphrased detection
-- [ ] Report settings
+- [x] Similarity Report UI - DOCUMENTED
+- [x] Source matching behavior - DOCUMENTED (algorithm UNAVAILABLE)
+- [x] Highlighting system - DOCUMENTED
+- [x] Exclusion controls - DOCUMENTED
+- [x] Percentage calculation - DOCUMENTED
+- [x] AI Writing Report - DOCUMENTED
+- [x] AI-generated detection - DOCUMENTED (model UNAVAILABLE)
+- [x] AI-paraphrased detection - DOCUMENTED (English only)
+- [x] Report settings - DOCUMENTED
 
 ---
 
@@ -162,17 +170,17 @@ Build a production-grade standalone system reproducing Canvas DocViewer, SpeedGr
 
 | Agent | Role | Model | Status | Current Task |
 |-------|------|-------|--------|--------------|
-| 0 | Lead Orchestrator | Claude Opus 5.5 Medium | 🟢 Active | Mission initialization |
-| 1 | Canvas RE | Not deployed | ⚪ Pending | - |
-| 2 | Turnitin RE | Not deployed | ⚪ Pending | - |
-| 3 | Document Engine | Not deployed | ⚪ Pending | - |
-| 4 | Annotation Engineer | Not deployed | ⚪ Pending | - |
-| 5 | Similarity Detection | Not deployed | ⚪ Pending | - |
-| 6 | AI Writing Detection | Not deployed | ⚪ Pending | - |
-| 7 | Frontend/UX Engineer | Not deployed | ⚪ Pending | - |
-| 8 | Computer Use QA | Not deployed | ⚪ Pending | - |
-| 9 | Security & Performance | Not deployed | ⚪ Pending | - |
-| 10 | Independent Reviewer | Not deployed | ⚪ Pending | - |
+| 0 | Lead Orchestrator | Claude Sonnet 4.5 | ✅ Active | Architecture complete, coordinating research |
+| 1 | Canvas RE | generalPurpose (inherit) | 🔄 Running | Canvas DocViewer & SpeedGrader research |
+| 2 | Turnitin RE | generalPurpose (inherit) | ✅ Complete | Turnitin research complete (2026-10-18) |
+| 3 | Document Engine | Not deployed | ⚪ Pending | Awaiting research completion |
+| 4 | Annotation Engineer | Not deployed | ⚪ Pending | Awaiting research completion |
+| 5 | Similarity Detection | Not deployed | ⚪ Pending | Awaiting research completion |
+| 6 | AI Writing Detection | Not deployed | ⚪ Pending | Awaiting research completion |
+| 7 | Frontend/UX Engineer | Not deployed | ⚪ Pending | Awaiting research completion |
+| 8 | Computer Use QA | Not deployed | ⚪ Pending | Awaiting research completion |
+| 9 | Security & Performance | Not deployed | ⚪ Pending | Awaiting research completion |
+| 10 | Independent Reviewer | Not deployed | ⚪ Pending | Awaiting research completion |
 
 ---
 
@@ -240,7 +248,8 @@ mysl8te-feature-lab/
 
 ---
 
-**Last Updated**: 2026-10-18 17:52 UTC  
+**Last Updated**: 2026-10-18 18:02 UTC  
 **Current Phase**: Milestone A - Research & Architecture  
 **Active Branch**: cursor/mission-architecture-a522  
-**Lead Agent**: Agent 0 (Claude Sonnet 4.5)
+**Lead Agent**: Agent 0 (Claude Sonnet 4.5)  
+**Milestone A Progress**: Agent 2 complete, Agent 1 running
