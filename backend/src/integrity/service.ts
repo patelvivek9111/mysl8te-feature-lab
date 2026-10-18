@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { DB } from '../db/database';
-import { analyzeSimilarity, type CorpusDocument, type SimilarityOptions, type SimilarityResult } from '../similarity';
+import { SimilarityIndex, type CorpusDocument, type SimilarityOptions, type SimilarityResult } from '../similarity';
 import { assessAiWriting, type AiWritingAssessment } from '../ai-writing';
 
 interface SubmissionContext { id: string; student_id: string; assignment_id: string; course_id: string; text: string | null; similarity_enabled: number; ai_assessment_enabled: number }
@@ -12,29 +12,64 @@ function context(db: DB, submissionId: string): SubmissionContext {
 }
 
 /**
- * The comparison corpus is restricted to the submission's own course (reference sources plus other students'
- * papers) so that report passages never disclose text from courses the viewer cannot access.
+ * The comparison corpus is restricted to the submission's own course (reference sources plus students' papers)
+ * so that report passages never disclose text from courses the viewer cannot access. The submitter's own papers
+ * are in the course index but excluded per request.
  */
-export function buildCorpus(db: DB, ctx: SubmissionContext): CorpusDocument[] {
-  const sources = db.prepare('SELECT id, title, url, text FROM reference_sources WHERE course_id = ?').all(ctx.course_id) as
-    { id: string; title: string; url: string | null; text: string }[];
+function corpusIds(db: DB, courseId: string): string[] {
+  const refs = db.prepare('SELECT id FROM reference_sources WHERE course_id = ?').all(courseId) as { id: string }[];
   const papers = db.prepare(`
-    SELECT s.id, a.title AS assignment_title, s.attempt, d.text FROM submissions s
-    JOIN assignments a ON a.id = s.assignment_id JOIN documents d ON d.id = s.document_id
-    WHERE a.course_id = ? AND s.student_id <> ? AND d.text IS NOT NULL AND d.text <> ''`).all(ctx.course_id, ctx.student_id) as
-    { id: string; assignment_title: string; attempt: number; text: string }[];
-  return [
-    ...sources.map((s) => ({ id: `ref:${s.id}`, title: s.title, type: 'REFERENCE' as const, text: s.text, url: s.url ?? undefined })),
-    ...papers.map((p) => ({ id: `sub:${p.id}`, title: `Student paper (${p.assignment_title}, attempt ${p.attempt})`, type: 'STUDENT_PAPER' as const, text: p.text })),
-  ];
+    SELECT s.id FROM submissions s JOIN assignments a ON a.id = s.assignment_id JOIN documents d ON d.id = s.document_id
+    WHERE a.course_id = ? AND d.text IS NOT NULL AND d.text <> ''`).all(courseId) as { id: string }[];
+  return [...refs.map((r) => `ref:${r.id}`), ...papers.map((p) => `sub:${p.id}`)];
+}
+
+function loadCorpusDocument(db: DB, id: string): CorpusDocument | null {
+  if (id.startsWith('ref:')) {
+    const s = db.prepare('SELECT title, url, text FROM reference_sources WHERE id = ?').get(id.slice(4)) as { title: string; url: string | null; text: string } | undefined;
+    return s ? { id, title: s.title, type: 'REFERENCE', text: s.text, url: s.url ?? undefined } : null;
+  }
+  const p = db.prepare(`SELECT a.title AS assignment_title, s.attempt, d.text FROM submissions s
+    JOIN assignments a ON a.id = s.assignment_id JOIN documents d ON d.id = s.document_id WHERE s.id = ?`).get(id.slice(4)) as
+    { assignment_title: string; attempt: number; text: string } | undefined;
+  return p ? { id, title: `Student paper (${p.assignment_title}, attempt ${p.attempt})`, type: 'STUDENT_PAPER', text: p.text } : null;
+}
+
+function ownPaperIds(db: DB, ctx: SubmissionContext): string[] {
+  const rows = db.prepare(`SELECT s.id FROM submissions s JOIN assignments a ON a.id = s.assignment_id WHERE a.course_id = ? AND s.student_id = ?`)
+    .all(ctx.course_id, ctx.student_id) as { id: string }[];
+  return rows.map((r) => `sub:${r.id}`);
+}
+
+const MAX_CACHED_COURSES = 32;
+const indexCache = new WeakMap<DB, Map<string, SimilarityIndex>>();
+
+/** Corpus documents are immutable once stored, so a cached course index only needs new ids added and deleted ids removed. */
+export function courseIndex(db: DB, courseId: string): SimilarityIndex {
+  let perDb = indexCache.get(db);
+  if (!perDb) indexCache.set(db, (perDb = new Map()));
+  let index = perDb.get(courseId);
+  if (index) perDb.delete(courseId);
+  else index = new SimilarityIndex();
+  perDb.set(courseId, index);
+  if (perDb.size > MAX_CACHED_COURSES) perDb.delete(perDb.keys().next().value!);
+  const current = new Set(corpusIds(db, courseId));
+  for (const id of index.ids()) if (!current.has(id)) index.remove(id);
+  for (const id of current) {
+    if (index.has(id)) continue;
+    const doc = loadCorpusDocument(db, id);
+    if (doc) index.add(doc);
+  }
+  return index;
 }
 
 export interface StoredSimilarityReport { id: string; submissionId: string; options: SimilarityOptions; result: SimilarityResult; createdAt: string }
 
 export function runSimilarity(db: DB, submissionId: string, options: SimilarityOptions = {}): StoredSimilarityReport {
   const ctx = context(db, submissionId);
-  const corpus = buildCorpus(db, ctx);
-  const result = analyzeSimilarity(ctx.text ?? '', corpus, options);
+  const index = courseIndex(db, ctx.course_id);
+  const excludedSourceIds = [...(options.excludedSourceIds ?? []), ...ownPaperIds(db, ctx)];
+  const result = index.analyze(ctx.text ?? '', { ...options, excludedSourceIds });
   const id = crypto.randomUUID();
   db.prepare('INSERT INTO similarity_reports (id, submission_id, options_json, result_json, overall_percent) VALUES (?, ?, ?, ?, ?)')
     .run(id, submissionId, JSON.stringify(options), JSON.stringify(result), result.overallPercent);

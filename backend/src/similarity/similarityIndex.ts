@@ -115,6 +115,10 @@ export class SimilarityIndex {
     return this.idToNum.size;
   }
 
+  ids(): string[] {
+    return [...this.idToNum.keys()];
+  }
+
   has(id: string): boolean {
     return this.idToNum.has(id);
   }

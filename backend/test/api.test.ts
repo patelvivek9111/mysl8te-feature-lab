@@ -250,7 +250,7 @@ describe('similarity and AI-writing assessment', () => {
     const refText = 'The water cycle describes the continuous movement of water on, above, and below the surface of the Earth, changing state between liquid, vapor, and ice.';
     expect((await request(app).post(`/api/courses/${courseId}/sources`).set(auth(teacher.token)).send({ title: 'Reader', text: refText })).status).toBe(201);
     expect((await request(app).post(`/api/courses/${courseId}/sources`).set(auth(alice.token)).send({ title: 'x', text: refText })).status).toBe(403);
-    await submit(alice.token, assignmentId, Buffer.from(ESSAY), 'alice.txt');
+    const aliceFirst = await submit(alice.token, assignmentId, Buffer.from(ESSAY), 'alice.txt');
     const bobText = `${refText} My own thoughts follow here about something entirely different and personal. ${ESSAY.slice(0, 160)}`;
     const bobSub = await submit(bob.token, assignmentId, Buffer.from(bobText), 'bob.txt');
     const id = bobSub.body.submission.id;
@@ -269,6 +269,19 @@ describe('similarity and AI-writing assessment', () => {
     expect(rerun.status).toBe(201);
     expect(rerun.body.report.sources.map((s: { type: string }) => s.type)).toEqual(['STUDENT_PAPER']);
     expect(rerun.body.report.overallPercent).toBeLessThan(report.body.report.overallPercent);
+
+    const delRef = await request(app).delete(`/api/courses/${courseId}/sources/${refSourceId.slice(4)}`).set(auth(teacher.token));
+    expect(delRef.status).toBe(200);
+    const afterDelete = await request(app).post(`/api/submissions/${id}/similarity`).set(auth(teacher.token)).send({});
+    expect(afterDelete.body.report.sources.map((s: { type: string }) => s.type)).toEqual(['STUDENT_PAPER']);
+    expect(afterDelete.body.report.sources.some((s: { sourceId: string }) => s.sourceId === `sub:${id}`)).toBe(false);
+
+    const aliceResubmit = await submit(alice.token, assignmentId, Buffer.from(bobText), 'copy.txt');
+    const aliceReport = await request(app).get(`/api/submissions/${aliceResubmit.body.submission.id}/similarity`).set(auth(teacher.token));
+    const aliceSources = aliceReport.body.report.sources.map((s: { sourceId: string }) => s.sourceId);
+    expect(aliceSources).toContain(`sub:${id}`);
+    expect(aliceSources.every((s: string) => !s.startsWith('ref:'))).toBe(true);
+    expect(aliceSources).not.toContain(`sub:${aliceFirst.body.submission.id}`);
 
     await request(app).patch(`/api/assignments/${assignmentId}`).set(auth(teacher.token)).send({ studentsSeeSimilarity: true });
     const studentReport = await request(app).get(`/api/submissions/${id}/similarity`).set(auth(bob.token));
