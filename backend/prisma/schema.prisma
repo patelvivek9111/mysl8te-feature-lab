@@ -171,7 +171,9 @@ model Submission {
   
   grade Grade?
   similarityReport SimilarityReport?
+  aiAssessment AiAssessment?
   annotations Annotation[]
+  processingJobs ProcessingJob[]
   
   @@unique([assignmentId, studentId, version])
   @@map("submissions")
@@ -238,6 +240,16 @@ enum DocumentFormat {
   BMP
   HEIC
   SVG
+  SOURCE
+  ZIP
+  TAR
+  SEVEN_Z
+  MP3
+  WAV
+  MP4
+  MOV
+  WEBM
+  EPUB
   OTHER
 }
 
@@ -276,6 +288,8 @@ model Annotation {
   content String? @db.Text // For text annotations
   color String?
   strokeData String? @db.Text // For drawings
+  // Format-aware anchor: text offsets, spreadsheet cells, code lines, or media timestamps.
+  anchor Json?
   
   isDraft Boolean @default(true) @map("is_draft")
   publishedAt DateTime? @map("published_at")
@@ -292,6 +306,7 @@ enum AnnotationType {
   POINT
   AREA
   HIGHLIGHT
+  UNDERLINE
   STRIKEOUT
   FREE_DRAW
   FREE_TEXT
@@ -536,4 +551,72 @@ enum NotificationType {
   COMMENT_ADDED
   ASSIGNMENT_CREATED
   SIMILARITY_COMPLETE
+  AI_ASSESSMENT_COMPLETE
+}
+
+// ============================================================================
+// SIMILARITY CORPUS
+// Authorized public-domain or lab-authored reference texts. Not a Turnitin corpus.
+// ============================================================================
+
+model CorpusDocument {
+  id String @id @default(uuid())
+  title String
+  author String
+  license String
+  sourceUrl String? @map("source_url")
+  text String @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("corpus_documents")
+}
+
+// ============================================================================
+// AI-WRITING ASSESSMENT (experimental, non-consequential)
+// ============================================================================
+
+model AiAssessment {
+  id String @id @default(uuid())
+
+  submissionId String @unique @map("submission_id")
+  submission   Submission @relation(fields: [submissionId], references: [id])
+
+  status ProcessingStatus @default(PENDING)
+  outcome String
+  consequentialUseEnabled Boolean @default(false) @map("consequential_use_enabled")
+  humanReviewRequired Boolean @default(true) @map("human_review_required")
+  uncertainty String
+  reasons Json
+  features Json?
+  limitations String @db.Text
+  evaluation Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("ai_assessments")
+}
+
+// ============================================================================
+// BACKGROUND JOBS
+// ============================================================================
+
+model ProcessingJob {
+  id String @id @default(uuid())
+
+  submissionId String? @map("submission_id")
+  submission   Submission? @relation(fields: [submissionId], references: [id])
+
+  type String
+  payload Json
+  status ProcessingStatus @default(PENDING)
+  attempts Int @default(0)
+  error String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("processing_jobs")
 }

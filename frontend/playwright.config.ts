@@ -20,7 +20,10 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: process.env.HEADED_DEMO ? { slowMo: 350 } : undefined,
+      },
     },
   ],
 
@@ -31,8 +34,8 @@ export default defineConfig({
       timeout: 120 * 1000,
       reuseExistingServer: !process.env.CI,
       env: {
-        NODE_ENV: 'test',
-        ALLOW_TEST_RESET: 'true',
+        NODE_ENV: 'development',
+        SEED_ON_BOOT: 'true',
       },
     },
     {

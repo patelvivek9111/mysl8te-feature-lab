@@ -9,7 +9,7 @@
 
 ## Mission Objective
 
-Build a production-grade standalone system that reproduces the accessible, observable functionality of Canvas DocViewer, Canvas SpeedGrader, and Turnitin Similarity Detection with complete verification evidence.
+Build a standalone academic review lab for document preview, grading, similarity overlap, and experimental AI-writing assessment. Original software only. AI scores are not proof of misconduct and consequential use stays disabled until a real benchmark exists. The production MySL8TE app is out of scope.
 
 **This is NOT a prototype. This is NOT a mockup. This is a real, functioning system.**
 
@@ -51,14 +51,8 @@ Independent plagiarism similarity detection:
 - Report generation
 - Must disclose differences from Turnitin
 
-### 4. Academic Integrity Guidance - APPROVED ✅
-Pedagogical tools (replaces AI detection):
-- Assignment design guidance
-- Process documentation tools
-- Educational resources
-- Red flag indicators (not detection)
-
-**AI Writing Detection: CANCELLED** - Research showed 43% accuracy, bias concerns, liability risks
+### 4. Experimental AI-writing assessment - RESTORED
+The product owner reversed the earlier cancellation. The lab includes a non-consequential writing-signal report with uncertainty, human review, and synthetic-fixture disclosure. It is not proof of authorship and not a Turnitin equivalent.
 
 ---
 
@@ -184,11 +178,10 @@ Each format requires: upload, preview, text extraction, annotation support, simi
 - [ ] Exclusion rules
 - [ ] Report generation
 
-### ⏳ Milestone F - Academic Integrity Guidance (Replaces AI Detection)
-- [ ] Assignment design guidance
-- [ ] Process documentation tools
-- [ ] Educational resources
-- [ ] Red flag indicators
+### Milestone F - Experimental AI-writing assessment
+- [x] Heuristic document-level outcome with inconclusive results
+- [x] Consequential use hardcoded off and human review required
+- [ ] Independent real-world benchmark before any consequential use
 
 ### ⏳ Milestone G - Full-System Integration
 - [ ] Module integration

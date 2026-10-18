@@ -9,7 +9,13 @@ export PATH="${NODE_PREFIX}/bin:${PATH}"
 export GHIDRA_INSTALL_DIR="${ROOT}/ghidra_12.1.4_PUBLIC"
 export JAVA_HOME="/usr/lib/jvm/java-21-openjdk-amd64"
 
-backend_up() { curl -sf "http://127.0.0.1:3001/api/health" >/dev/null; }
+sudo service postgresql start
+until pg_isready -q; do sleep 1; done
+sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='ubuntu'" | grep -q 1 || sudo -u postgres createuser -s ubuntu
+sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='mysl8te_feature_lab'" | grep -q 1 || sudo -u postgres createdb -O ubuntu mysl8te_feature_lab
+(cd "${ROOT}/backend" && npx prisma db push --skip-generate)
+
+backend_up() { curl -sf "http://127.0.0.1:3001/api/health" | grep -q academic-review-lab; }
 frontend_up() { curl -sf -o /dev/null "http://127.0.0.1:5173/"; }
 
 start_session() {
@@ -23,7 +29,7 @@ start_session() {
 }
 
 if ! backend_up; then
-  start_session backend "${ROOT}/backend" "export NODE_ENV=development ALLOW_TEST_RESET=true; exec npm run dev"
+  start_session backend "${ROOT}/backend" "export NODE_ENV=development SEED_ON_BOOT=true; exec npm run dev"
 fi
 
 if ! frontend_up; then

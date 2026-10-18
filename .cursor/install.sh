@@ -37,10 +37,10 @@ install_node() {
 
 install_node
 
-if ! java -version >/dev/null 2>&1; then
-  echo "Installing OpenJDK 21..."
+if ! java -version >/dev/null 2>&1 || ! command -v psql >/dev/null || ! command -v pdftotext >/dev/null || ! command -v unzip >/dev/null; then
+  echo "Installing JDK, PostgreSQL, and document tools..."
   sudo apt-get update
-  sudo apt-get install -y --no-install-recommends openjdk-21-jdk-headless ca-certificates
+  sudo apt-get install -y --no-install-recommends openjdk-21-jdk-headless ca-certificates postgresql postgresql-contrib poppler-utils unzip p7zip-full
 fi
 
 if [[ ! -x /usr/lib/jvm/java-21-openjdk-amd64/bin/java ]]; then
@@ -80,6 +80,7 @@ fi
 echo "Installing workspace dependencies..."
 cd "${ROOT}"
 npm ci
+(cd "${ROOT}/backend" && npx prisma generate)
 
 echo "Installing Playwright Chromium..."
 cd "${ROOT}/frontend"

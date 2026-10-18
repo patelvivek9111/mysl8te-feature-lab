@@ -1,15 +1,19 @@
 # Critical Architectural Decision: AI Writing Detection
 
+**Superseded on 2026-10-18 by the product owner.** The removal below is historical research, not the current scope.
+
+Current requirement: an experimental writing-signal assessment stays in the product. It must disclose uncertainty, keep consequential use disabled, require human review, and never be described as proof of misconduct or as equivalent to Turnitin. Synthetic fixture scores are not real-world accuracy. See ADR-007 in `DECISIONS.md` and `backend/src/services/aiAssessment.ts`.
+
 **Date**: 2026-10-18  
 **Decision Authority**: Agent 0 - Lead Orchestrator  
 **Based On**: Comprehensive research by [Agent 2](bc-de66aad3-a309-5d9d-ba1c-0fc63ef83a4c)  
-**Status**: ARCHITECTURE REVISED
+**Status**: SUPERSEDED
 
 ---
 
 ## Decision Summary
 
-**❌ DO NOT BUILD AI WRITING DETECTION FEATURE**
+**Historical decision, now superseded: do not build AI writing detection.**
 
 Based on comprehensive research findings, we are **removing AI Writing Detection from the MySL8TE Feature Lab scope**. The feature presents unacceptable accuracy, bias, and liability risks that contradict the mission's quality and ethical standards.
 

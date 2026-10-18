@@ -1,83 +1,23 @@
-import express, { Request, Response } from 'express';
-import cors from 'cors';
+import { createApp } from './app';
+import { seedDemo } from './seed';
+import { startWorker } from './worker';
 
-const app = express();
-const PORT = process.env.PORT || 3001;
+const port = Number(process.env.PORT || 3001);
 
-app.use(cors());
-app.use(express.json());
-
-let counter = 0;
-let notes: string[] = [];
-
-app.get('/api/health', (req: Request, res: Response) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime() 
+async function main(): Promise<void> {
+  if (process.env.SEED_ON_BOOT === 'true') {
+    await seedDemo();
+  }
+  const app = createApp();
+  app.listen(port, '0.0.0.0', () => {
+    console.log(JSON.stringify({ level: 'info', message: 'academic review lab listening', port }));
   });
-});
+  startWorker();
+}
 
-app.get('/api/counter', (req: Request, res: Response) => {
-  res.json({ counter });
-});
-
-app.post('/api/counter/increment', (req: Request, res: Response) => {
-  counter++;
-  res.json({ counter, message: 'Counter incremented' });
-});
-
-app.post('/api/counter/reset', (req: Request, res: Response) => {
-  counter = 0;
-  res.json({ counter, message: 'Counter reset' });
-});
-
-app.get('/api/notes', (req: Request, res: Response) => {
-  res.json({ notes });
-});
-
-app.post('/api/notes', (req: Request, res: Response) => {
-  const { note } = req.body;
-  if (!note) {
-    return res.status(400).json({ error: 'Note content is required' });
-  }
-  notes.push(note);
-  res.json({ notes, message: 'Note added' });
-});
-
-app.delete('/api/notes', (req: Request, res: Response) => {
-  notes = [];
-  res.json({ notes, message: 'All notes cleared' });
-});
-
-app.post('/api/test/reset', (req: Request, res: Response) => {
-  // SECURITY: Never allow test reset in production, even with override flag
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(403).json({ 
-      error: 'Test reset endpoint is disabled in production',
-      env: 'production'
-    });
-  }
-  
-  // Allow in test/development environments
-  const isTestEnv = process.env.NODE_ENV === 'test' || 
-                    process.env.NODE_ENV === 'development' || 
-                    process.env.ALLOW_TEST_RESET === 'true';
-  
-  if (!isTestEnv) {
-    return res.status(403).json({ 
-      error: 'Test reset endpoint is disabled',
-      env: process.env.NODE_ENV || 'undefined'
-    });
-  }
-  
-  counter = 0;
-  notes = [];
-  res.json({ counter, notes, message: 'Test state reset' });
-});
-
-app.listen(PORT, () => {
-  console.log(`Backend server running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/api/health`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

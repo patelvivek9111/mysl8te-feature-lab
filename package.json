@@ -18,7 +18,17 @@
     "test": "npm run test:playwright",
     "test:playwright": "cd frontend && npx playwright test"
   },
-  "keywords": ["research", "reverse-engineering", "testing"],
+  "keywords": [
+    "research",
+    "reverse-engineering",
+    "testing"
+  ],
   "author": "MySL8TE Feature Lab",
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "allowScripts": {
+    "prisma@5.22.0": true,
+    "@prisma/client@5.22.0": true,
+    "@prisma/engines@5.22.0": true,
+    "esbuild@0.28.2": true
+  }
 }

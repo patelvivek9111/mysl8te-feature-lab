@@ -5,10 +5,18 @@
 
 ---
 
-## ADR-001: Remove AI Writing Detection from Scope
+## ADR-007: Restore experimental AI-writing assessment
 
 **Date**: 2026-10-18  
 **Status**: ACCEPTED  
+**Supersedes**: ADR-001
+
+The product owner reversed the earlier removal. The lab now runs an original heuristic writing-signal check: short texts are inconclusive; repeated formulaic connectors with low burstiness raise an AI-writing signal; varied human-looking text can raise a human-writing signal; everything else is inconclusive. `consequentialUseEnabled` is hardcoded false. `humanReviewRequired` is hardcoded true. The six-fixture evaluation is synthetic and must not be reported as field accuracy. No student is disciplined from this score.
+
+## ADR-001: Remove AI Writing Detection from Scope
+
+**Date**: 2026-10-18  
+**Status**: SUPERSEDED by ADR-007  
 **Decision**: Do not build AI writing detection feature  
 **Context**: Comprehensive research by Agent 2 on Turnitin AI detection
 

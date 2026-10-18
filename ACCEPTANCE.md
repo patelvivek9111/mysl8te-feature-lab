@@ -1,5 +1,13 @@
 # Final Acceptance Criteria
 
+**Current verdict (2026-10-18): NOT RELEASE READY.**
+
+Working and tested: instructor/student login, course and assignment pages, student upload, background text extraction for TXT/PDF/DOCX, draft grades and annotations hidden from the author and from other students, publish, similarity overlap against public-domain sources, experimental AI report with consequential use forced off, text transcript download, and Playwright coverage of the teacher-publish and student-upload paths.
+
+Not accepted yet: hosted URL, versioned migrations, full format matrix, glyph-accurate PDF annotations, freehand/area/strikethrough tools, comment replies, annotated original export, real-world AI or similarity benchmarks, performance numbers, and an independent reviewer sign-off.
+
+The checklist below is the original bar. Unchecked items remain open.
+
 **Mission**: MySL8TE Feature Lab - Standalone Document Review & Academic Integrity Platform  
 **Target**: Production-grade, verifiable, evidence-backed release
 
