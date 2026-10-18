@@ -51,6 +51,18 @@ app.delete('/api/notes', (req: Request, res: Response) => {
 });
 
 app.post('/api/test/reset', (req: Request, res: Response) => {
+  // Restrict to test/development environments only
+  const isTestEnv = process.env.NODE_ENV === 'test' || 
+                    process.env.NODE_ENV === 'development' || 
+                    process.env.ALLOW_TEST_RESET === 'true';
+  
+  if (!isTestEnv) {
+    return res.status(403).json({ 
+      error: 'Test reset endpoint is disabled in production',
+      env: process.env.NODE_ENV || 'undefined'
+    });
+  }
+  
   counter = 0;
   notes = [];
   res.json({ counter, notes, message: 'Test state reset' });
@@ -59,4 +71,5 @@ app.post('/api/test/reset', (req: Request, res: Response) => {
 app.listen(PORT, () => {
   console.log(`Backend server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
