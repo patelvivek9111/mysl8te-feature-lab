@@ -12,6 +12,7 @@ import { audit } from '../audit';
 import { transaction, type DB } from '../db/database';
 import { runAutomaticChecks } from '../integrity/service';
 import { renderFeedbackExport } from '../documents/export';
+import { renderAnnotatedPdf } from '../documents/pdfExport';
 
 export interface SubmissionRouterConfig { uploadDir: string; maxFileSize: number }
 
@@ -328,10 +329,18 @@ export function createSubmissionRouter(config: SubmissionRouterConfig): Router {
     res.json({ grade: visibleGrade(req.db, access) });
   }));
 
-  router.get('/submissions/:submissionId/export', ah((req, res) => {
+  router.get('/submissions/:submissionId/export', ah(async (req, res) => {
     const user = requireUser(req);
     const access = loadSubmission(req.db, user, param(req, 'submissionId'));
     const detail = submissionDetail(req.db, access, user.id);
+    if (req.query.format === 'pdf') {
+      const doc = req.db.prepare('SELECT storage_path FROM documents WHERE id = ?').get(access.submission.document_id) as { storage_path: string };
+      const pdf = await renderAnnotatedPdf(detail, doc.storage_path);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="feedback-${access.submission.id}.pdf"`);
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.send(Buffer.from(pdf));
+    }
     const html = renderFeedbackExport(detail);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");

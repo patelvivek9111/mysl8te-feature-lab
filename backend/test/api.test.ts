@@ -7,6 +7,13 @@ import { createApp } from '../src/app';
 import { openDatabase, resetDatabase } from '../src/db/database';
 import { resetRateLimits } from '../src/auth/auth';
 import { makeDocx, makePdf } from './fixtures';
+import { extractContent } from '../src/documents/processing';
+
+const binaryParser = (res: NodeJS.ReadableStream, cb: (err: Error | null, body: Buffer) => void) => {
+  const chunks: Buffer[] = [];
+  res.on('data', (c: Buffer) => chunks.push(c));
+  res.on('end', () => cb(null, Buffer.concat(chunks)));
+};
 
 const uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mysl8te-test-'));
 const db = openDatabase(':memory:');
@@ -200,6 +207,15 @@ describe('submissions, annotations and grading', () => {
     expect(exported.text).toContain('37.5');
     expect(exported.text).not.toMatch(/<script/i);
 
+    const pdfExport = await request(app).get(`/api/submissions/${id}/export?format=pdf`).set(auth(alice.token)).buffer(true).parse(binaryParser as never);
+    expect(pdfExport.status).toBe(200);
+    expect(pdfExport.headers['content-type']).toBe('application/pdf');
+    const exported2 = await extractContent(pdfExport.body as Buffer, 'PDF');
+    expect(exported2.pageCount).toBe(3);
+    expect(exported2.text).toContain('natural sponges');
+    expect(exported2.text).toContain('Strong opening sentence');
+    expect(exported2.text).toContain('37.5 / 50 (published)');
+
     const teacherList = await request(app).get(`/api/assignments/${assignmentId}`).set(auth(teacher.token));
     expect(teacherList.body.submissions).toHaveLength(1);
     expect(teacherList.body.submissions[0].gradeStatus).toBe('published');
@@ -219,6 +235,12 @@ describe('submissions, annotations and grading', () => {
     const html = await submit(alice.token, assignmentId, Buffer.from('<p onclick="x()">Hello<script>alert(1)</script></p>'), 'page.html');
     expect(html.status).toBe(201);
     expect(html.body.document.html).toBe('<p>Hello</p>');
+
+    const docxPdf = await request(app).get(`/api/submissions/${docx.body.submission.id}/export?format=pdf`).set(auth(alice.token)).buffer(true).parse(binaryParser as never);
+    expect(docxPdf.status).toBe(200);
+    const parsed = await extractContent(docxPdf.body as Buffer, 'PDF');
+    expect(parsed.text).toContain('Wetlands act as natural sponges');
+    expect(parsed.text).toContain('No grade has been released.');
   });
 });
 
