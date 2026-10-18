@@ -7,27 +7,34 @@
 
 ## Active Tasks (In Progress)
 
-### B1 - Database Schema Design
-- **Owner**: Agent 0
-- **Status**: NOT STARTED
-- **Priority**: P0 (blocking all implementation)
-- **Dependencies**: None
-- **Acceptance**: PostgreSQL schema with migrations, all core entities
-- **Verification**: Schema validates, migrations run cleanly
+**None** - B1 just completed, ready to deploy parallel agents
 
-### B2 - File Upload API
-- **Owner**: Unassigned
-- **Status**: NOT STARTED
-- **Priority**: P0
-- **Dependencies**: B1 (database)
-- **Acceptance**: REST API accepts files, validates, stores metadata
-- **Verification**: Unit tests pass, handles invalid files
+---
+
+## Recently Completed
+
+### B1 - Database Schema Design ✅
+- **Owner**: Agent 0
+- **Status**: COMPLETE
+- **Completed**: 2026-10-18
+- **Duration**: ~30 minutes
+- **Deliverables**: 600+ line Prisma schema, 23 models, client generated
+- **Verification**: Schema validates, client generated successfully
+- **Unblocked**: B2, B3, B5, C1, D1, E1 (20+ tasks)
 
 ---
 
 ## Ready Queue (Unblocked, Not Started)
 
-### B3 - Format Detection System
+### B2 - File Upload API  
+- **Owner**: Unassigned → **DEPLOY NEXT**
+- **Status**: READY (B1 unblocked this)
+- **Priority**: P0
+- **Dependencies**: ✅ B1 (database) - COMPLETE
+- **Acceptance**: REST API accepts files, validates, stores metadata
+- **Verification**: Unit tests pass, handles invalid files
+- **Estimate**: 3-4 hours
+- **Can Deploy**: NOW
 - **Owner**: Unassigned
 - **Status**: READY
 - **Priority**: P0
@@ -46,13 +53,14 @@
 - **Estimate**: 4-6 hours
 
 ### B5 - Text Extraction Engine
-- **Owner**: Unassigned
-- **Status**: READY
+- **Owner**: Unassigned → **DEPLOY NEXT**
+- **Status**: READY (B1 unblocked this)
 - **Priority**: P0
-- **Dependencies**: B3 (format detection)
+- **Dependencies**: ✅ B3 (format detection) or can start independently
 - **Acceptance**: Extract text from PDF, DOCX, TXT, Markdown
 - **Verification**: Extracted text matches source
 - **Estimate**: 3-4 hours
+- **Can Deploy**: NOW (parallel with B2, B3)
 
 ### B6 - Preview Generation
 - **Owner**: Unassigned
