@@ -51,14 +51,22 @@ app.delete('/api/notes', (req: Request, res: Response) => {
 });
 
 app.post('/api/test/reset', (req: Request, res: Response) => {
-  // Restrict to test/development environments only
+  // SECURITY: Never allow test reset in production, even with override flag
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ 
+      error: 'Test reset endpoint is disabled in production',
+      env: 'production'
+    });
+  }
+  
+  // Allow in test/development environments
   const isTestEnv = process.env.NODE_ENV === 'test' || 
                     process.env.NODE_ENV === 'development' || 
                     process.env.ALLOW_TEST_RESET === 'true';
   
   if (!isTestEnv) {
     return res.status(403).json({ 
-      error: 'Test reset endpoint is disabled in production',
+      error: 'Test reset endpoint is disabled',
       env: process.env.NODE_ENV || 'undefined'
     });
   }
