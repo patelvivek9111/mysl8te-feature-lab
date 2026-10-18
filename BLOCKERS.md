@@ -1,62 +1,24 @@
 # Blockers - Unresolved Dependencies
 
-**Last Updated**: 2026-10-18 18:24 UTC  
-**Active Blockers**: 0  
-**Resolved Blockers**: 1
-
----
+**Last Updated**: 2026-10-18 19:15 UTC
 
 ## Active Blockers
 
-**None** - All current work is unblocked.
+### BLOCKER-002: Independent labeled dataset for AI-writing evaluation
+- **Impact**: AI-writing assessment cannot leave EXPERIMENTAL; no accuracy may be claimed (ADR-009).
+- **Needed from owner**: an authorized, consented labeled corpus (human / AI-generated / AI-paraphrased / hybrid), including non-native English writers and multiple disciplines, sized per the release gates in `docs/evaluations/AI_WRITING_RELEASE_GATES.md`. Synthetic self-written samples are not acceptable evidence.
+- **Workaround**: harness + smoke dataset prove the plumbing; the feature stays teacher-only with mandatory human review.
 
----
+### BLOCKER-003: External source corpus for similarity
+- **Impact**: Similarity compares only against instructor reference sources and other students' papers in the same course. No internet or publication matching.
+- **Needed from owner**: decision on a licensed search/publication API (cost + terms) or a provided corpus.
+- **Workaround**: teachers add reference sources per course; limitation disclosed in every report.
 
-## Resolved Blockers
+## Resolved
+- **BLOCKER-001** (AI detection accuracy): originally resolved by cancelling the feature; superseded by ADR-009, now tracked as BLOCKER-002.
+- **PostgreSQL unavailable**: resolved by ADR-008 (SQLite via node:sqlite).
 
-### ✅ BLOCKER-001: AI Detection Accuracy (RESOLVED - Scope Change)
-- **Raised**: 2026-10-18 during research phase
-- **Type**: Technical + Ethical
-- **Impact**: Blocked AI detection implementation
-- **Description**: Research showed 43% accuracy for hybrid content, 60% for humanized AI, significant bias concerns
-- **Resolution**: Architectural decision to remove AI detection from scope, replace with Academic Integrity Guidance System
-- **Resolved**: 2026-10-18
-- **Decision Document**: docs/architecture/AI_DETECTION_DECISION.md
-
----
-
-## Potential Future Blockers
-
-### ⚠️ WATCH: Third-Party Service Dependencies
-- **Risk**: OCR, document conversion, or AI services may require paid APIs
-- **Mitigation**: Use open-source alternatives (tesseract.js, LibreOffice) as primary
-- **Fallback**: Cloud APIs only if needed, with cost approval
-- **Status**: MONITORING
-
-### ⚠️ WATCH: PostgreSQL vs Elasticsearch
-- **Risk**: Full-text search performance may require Elasticsearch
-- **Mitigation**: Start with PostgreSQL full-text, benchmark, upgrade if needed
-- **Impact**: May need infrastructure setup
-- **Status**: DEFERRED (test PostgreSQL first)
-
-### ⚠️ WATCH: Large File Processing
-- **Risk**: 100MB files may timeout or exhaust memory
-- **Mitigation**: Stream processing, chunking, background workers
-- **Impact**: May need architecture adjustment
-- **Status**: MONITORING (test with real files)
-
----
-
-## Escalation Criteria
-
-Escalate to user only when:
-1. External credentials or paid service authorization needed
-2. Architectural decision requires policy clarification
-3. Platform or quota limits prevent further execution
-4. Consequential decision outside engineering judgment
-
-**Do NOT escalate**: Installation failures, dependency conflicts, coding bugs, test failures, ordinary architectural choices
-
----
-
-**Current Status**: No active blockers, Milestone B proceeding
+## Watch list
+- `node:sqlite` is experimental in Node 22/24 (stable API so far; pinned by tests).
+- OCR (tesseract.js) and Office-to-PDF conversion (LibreOffice) need extra downloads in `.cursor/install.sh`.
+- Ghidra (5k files) is committed to git and required by `install.sh`; consider moving to a download step.
