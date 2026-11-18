@@ -28,7 +28,7 @@ Fresh VM without install having run: `sudo apt-get install -y postgresql poppler
 ## Verify (must stay green)
 
 ```bash
-cd backend && npm run typecheck && npm test     # 61 vitest unit + 25 node:test integration (PostgreSQL)
+cd backend && npm run typecheck && npm test     # 74 vitest unit + 27 node:test integration (PostgreSQL; needs poppler-utils)
 cd ../frontend && npm run build && npx playwright test   # 8 E2E with video, starts both servers
 ```
 
@@ -42,7 +42,7 @@ Schema changes: edit `backend/prisma/schema.prisma`, then `npx prisma migrate de
 
 ## Architecture map
 
-- `backend/src/app.ts` routes; `services/` (auth sessions + password policy, rateLimit, access, extract, similarity service, AI assessment service); `worker.ts` background jobs; `seed.ts`.
+- `backend/src/app.ts` routes; `services/` (auth sessions + password policy, rateLimit, access, extract, similarity service, AI assessment service, pdfExport); `worker.ts` background jobs; `seed.ts`.
 - `backend/src/similarity/` k-gram engine (pure TS). `backend/src/ai-writing/` experimental signal module, evaluation harness, release gates (pure TS).
 - `backend/prisma/` schema and migrations. `frontend/src/App.tsx`, `AiReviewCard.tsx`; `frontend/tests/` Playwright.
 

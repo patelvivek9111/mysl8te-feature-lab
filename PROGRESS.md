@@ -8,10 +8,11 @@
 | Branches | Unified on `cursor/academic-review-lab-ba77` (ADR-010). SQLite branch frozen after porting its engines. |
 | Persistence | PostgreSQL 16 + Prisma with versioned migrations. |
 | Authentication | Opaque bearer tokens stored hashed in `sessions` (12 h absolute, 2 h idle), logout, sign out everywhere, password change with policy that revokes other sessions, failure-based rate limiting (per IP+email and per IP), generic login errors, security headers, 400/413 for bad JSON and uploads. |
-| Teacher and student workspaces | Working for the seeded course: upload, review, draft/publish, rubric, transcript download. |
+| Teacher and student workspaces | Working for the seeded course: upload, review, draft/publish, rubric, annotated feedback PDF download. |
 | Document engine | Tested TXT, Markdown, CSV, source, PDF, DOCX, ZIP listing, PNG preview. Other formats are stored or partially handled. |
 | Annotations | Text-offset highlight, underline, point comments. No reply threads in UI yet; not glyph-accurate PDF markup. |
+| Export | Annotated feedback PDF (pdf-lib): grade and rubric summary, numbered annotation list with replies, extracted text with highlight/underline/strikethrough drawn over the anchored characters, original PDF pages (up to 200) with page-positioned marks honouring rotation and crop box. Students get the published view only; exports are audited. |
 | Similarity | Independent k-gram engine with NEAR matching, exclusions, ranked attribution against reference texts and peer submissions; classmates' names and text redacted for students. Not a plagiarism finding, not Turnitin. |
 | AI-writing assessment | Experimental signal module, teacher-only, uncertainty band, safeguards, mandatory recorded teacher review. 0 of 6 release gates met. |
-| Tests (2026-11-18) | Backend 61 unit + 25 integration passed (also on a freshly reset database); typecheck clean; frontend build passed, lint 4 pre-existing warnings; Playwright 8 passed (run twice). |
+| Tests (2026-11-18) | Backend 74 unit + 27 integration passed; typecheck clean; frontend build passed, lint 4 pre-existing warnings; Playwright 8 passed (the teacher/student flow now downloads and parses the PDF). |
 | Demo | Local preview at port 5173. No public HTTPS deployment. |

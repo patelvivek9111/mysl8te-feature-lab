@@ -19,20 +19,20 @@ DONE means code plus passing automated tests on this branch.
 | UNIFY-5: versioned Prisma migrations replace `db push`; baseline for old databases; post-deploy drift check | `prisma/migrations`, `scripts/migrate.sh`; verified on fresh, existing, and legacy `db push` databases |
 | REVIEW-INT: integration review findings fixed (peer redaction for students, review history in audit log, non-blocking stale rebuild, review race/status checks) | product tests 13-14, `ACCEPTANCE.md` |
 | node_modules untracked | commit 0bb6975 |
+| PORT-PDF: annotated feedback PDF replaces the text transcript (text marks over character ranges, original PDF pages with rotation-aware page marks, 200-page cap, drafts hidden from students, audited); annotation input validation; independent review findings fixed | `src/services/pdfExport.test.ts` (13), product tests 26-27, `tests/workflows.spec.ts` download check |
 | PORT-SEC: revocable hashed sessions, logout/logout-all, password change + policy, login and password-change rate limiting, enumeration-safe login, security headers, JSON/upload size errors, Account UI; independent review findings fixed | `src/auth.test.ts` (11), `src/services/authPolicy.test.ts` (10), `tests/auth.spec.ts` (3) |
 
 ## Ready (priority order)
 
-1. **PORT-PDF** Port annotated PDF export (`documents/pdfExport.ts`, pdf-lib) to replace the text-transcript export; test by parsing the exported PDF.
-2. **REVIEW-INT-2** Remaining low findings: refresh the AI paraphrase context after similarity recalculation (keeping review history), persist excluded-region offsets for highlighting, decide the admin review policy.
-3. **ANNOT-2** Comment reply threads in the API and UI (the `Comment.parentId` column exists), notification mark-read in the UI, strikethrough/area/freehand tools.
-4. **CI-1** GitHub Actions: Postgres service, backend typecheck + tests, frontend build + lint + Playwright, upload videos.
-5. **PERF-1** Per-course cached similarity index (port `similarityIndex` caching approach) and benchmarks: 25 MB PDF extract, 2k-document corpus via API, 500 annotations.
-6. **FMT-1** Format matrix expansion only with passing tests: ODT, XLSX/PPTX text, OCR (tesseract), Office-to-PDF (LibreOffice).
-7. **E5** Turnitin-style match groups (not cited/quoted, missing quotations, missing citation) on top of quote/citation detection.
-8. **G2** Institution isolation tests and admin UI.
-9. **SEC-2** Security review report: authorization matrix tests, upload fuzzing, dependency audit. Independent review recorded in `ACCEPTANCE.md`.
-10. **SEC-3** Auth follow-ups from the PORT-SEC review: distributed per-account brute-force protection without enabling lockout DoS (progressive delay), shared rate-limit store for multi-instance deploys, optional MFA, admin-driven password reset.
+1. **REVIEW-INT-2** Remaining low findings: refresh the AI paraphrase context after similarity recalculation (keeping review history), persist excluded-region offsets for highlighting, decide the admin review policy.
+2. **ANNOT-2** Comment reply threads in the API and UI (the `Comment.parentId` column exists), notification mark-read in the UI, strikethrough/area/freehand tools.
+3. **CI-1** GitHub Actions: Postgres service, `poppler-utils` (renderer tests require `pdftotext`/`pdftoppm`), backend typecheck + tests, frontend build + lint + Playwright, upload videos.
+4. **PERF-1** Per-course cached similarity index (port `similarityIndex` caching approach), move PDF export rendering off the request thread (worker or cache), cap FREE_DRAW stroke data, and benchmarks: 25 MB PDF extract, 2k-document corpus via API, 500 annotations.
+5. **FMT-1** Format matrix expansion only with passing tests: ODT, XLSX/PPTX text, OCR (tesseract), Office-to-PDF (LibreOffice).
+6. **E5** Turnitin-style match groups (not cited/quoted, missing quotations, missing citation) on top of quote/citation detection.
+7. **G2** Institution isolation tests and admin UI.
+8. **SEC-2** Security review report: authorization matrix tests, upload fuzzing, dependency audit. Independent review recorded in `ACCEPTANCE.md`.
+9. **SEC-3** Auth follow-ups from the PORT-SEC review: distributed per-account brute-force protection without enabling lockout DoS (progressive delay), shared rate-limit store for multi-instance deploys, optional MFA, admin-driven password reset.
 
 ## Blocked
 
