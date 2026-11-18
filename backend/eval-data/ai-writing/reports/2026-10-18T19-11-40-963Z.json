@@ -1,0 +1,204 @@
+{
+  "generatedAt": "2026-10-18T19:11:40.963Z",
+  "dataset": "eval-data/ai-writing/smoke.jsonl",
+  "evaluationId": "eval-7d6ed91b",
+  "modelVersion": "ai-writing-heuristic-0.1.0-experimental",
+  "operatingThreshold": 0.55,
+  "minWords": 100,
+  "counts": {
+    "total": 12,
+    "byLabel": {
+      "human": 4,
+      "ai": 4,
+      "ai_paraphrased": 2,
+      "hybrid": 2
+    },
+    "scoredByLabel": {
+      "human": 4,
+      "ai": 4,
+      "ai_paraphrased": 2,
+      "hybrid": 2
+    },
+    "notScored": {
+      "insufficientText": 0,
+      "unsupportedLanguage": 0,
+      "other": 0
+    }
+  },
+  "statusCountsByLabel": {
+    "human": {
+      "NO_NOTABLE_SIGNALS": 3,
+      "INCONCLUSIVE": 1
+    },
+    "ai": {
+      "INCONCLUSIVE": 4
+    },
+    "ai_paraphrased": {
+      "NO_NOTABLE_SIGNALS": 1,
+      "INCONCLUSIVE": 1
+    },
+    "hybrid": {
+      "NO_NOTABLE_SIGNALS": 2
+    }
+  },
+  "auroc": {
+    "humanVsAi": 1,
+    "humanVsAiParaphrased": 1,
+    "humanVsHybrid": 1
+  },
+  "humanFpr": {
+    "falsePositives": 0,
+    "n": 4,
+    "rate": 0,
+    "wilsonUpper95": 0.4899
+  },
+  "detectionRateAtThreshold": {
+    "ai": 1,
+    "aiParaphrased": 0,
+    "hybrid": 0
+  },
+  "groupFpr": [
+    {
+      "group": "native_en",
+      "n": 2,
+      "falsePositives": 0,
+      "rate": 0,
+      "smoothedRate": 0.1667
+    },
+    {
+      "group": "non_native_en",
+      "n": 2,
+      "falsePositives": 0,
+      "rate": 0,
+      "smoothedRate": 0.1667
+    }
+  ],
+  "fprDisparityRatio": null,
+  "calibration": {
+    "bins": [
+      {
+        "low": 0,
+        "high": 0.1,
+        "count": 1,
+        "meanScore": 0.0665,
+        "observedAiRate": 0
+      },
+      {
+        "low": 0.1,
+        "high": 0.2,
+        "count": 1,
+        "meanScore": 0.1237,
+        "observedAiRate": 0
+      },
+      {
+        "low": 0.2,
+        "high": 0.3,
+        "count": 2,
+        "meanScore": 0.2705,
+        "observedAiRate": 0
+      },
+      {
+        "low": 0.3,
+        "high": 0.4,
+        "count": 0,
+        "meanScore": null,
+        "observedAiRate": null
+      },
+      {
+        "low": 0.4,
+        "high": 0.5,
+        "count": 0,
+        "meanScore": null,
+        "observedAiRate": null
+      },
+      {
+        "low": 0.5,
+        "high": 0.6,
+        "count": 0,
+        "meanScore": null,
+        "observedAiRate": null
+      },
+      {
+        "low": 0.6,
+        "high": 0.7,
+        "count": 4,
+        "meanScore": 0.6667,
+        "observedAiRate": 1
+      },
+      {
+        "low": 0.7,
+        "high": 0.8,
+        "count": 0,
+        "meanScore": null,
+        "observedAiRate": null
+      },
+      {
+        "low": 0.8,
+        "high": 0.9,
+        "count": 0,
+        "meanScore": null,
+        "observedAiRate": null
+      },
+      {
+        "low": 0.9,
+        "high": 1,
+        "count": 0,
+        "meanScore": null,
+        "observedAiRate": null
+      }
+    ],
+    "expectedCalibrationError": 0.2581,
+    "basis": "human (y=0) vs ai (y=1) samples only; score is a heuristic and is not expected to be calibrated until refitted."
+  },
+  "gates": [
+    {
+      "id": "G1_DATASET_SIZE",
+      "description": "Labelled evaluation set of independently sourced samples, including human writing by non-native English writers (group name matching /non[-_ ]?native|esl|ell/i).",
+      "threshold": ">= 2000 samples total; >= 500 human and >= 500 ai; >= 200 human samples in a non-native group",
+      "passed": false,
+      "observed": "total=12, human=4, ai=4, non-native human (scored)=2"
+    },
+    {
+      "id": "G2_AUROC",
+      "description": "Discrimination between human and AI-generated text on held-out data not used to tune weights or thresholds.",
+      "threshold": "AUROC (human vs ai) >= 0.90, with >= 500 scored human and >= 500 scored ai samples",
+      "passed": false,
+      "observed": "AUROC=1.0000 (held-out status must be attested by the G6 reviewer); not passable: requires >= 500 scored human and ai samples (have 4/4)"
+    },
+    {
+      "id": "G3_HUMAN_FPR",
+      "description": "False-positive rate on human-written samples at the operating threshold.",
+      "threshold": "FPR <= 1% and Wilson 95% upper bound <= 2%, with >= 500 scored human and ai samples",
+      "passed": false,
+      "observed": "FPR=0.00% (0/4), Wilson upper 95%=48.99%; not passable: requires >= 500 scored human and ai samples (have 4/4)"
+    },
+    {
+      "id": "G4_SUBGROUP_DISPARITY",
+      "description": "Ratio of the highest to lowest smoothed human FPR across subgroups with >= 100 human samples (at least 2 such groups required).",
+      "threshold": "max/min smoothed FPR <= 1.5 (ratio is 1 when no group has a false positive)",
+      "passed": false,
+      "observed": "insufficient subgroup data (0 group(s) with >= 100 scored human samples)"
+    },
+    {
+      "id": "G5_CALIBRATION",
+      "description": "Expected calibration error of score vs observed AI rate (human vs ai samples, 10 equal-width bins).",
+      "threshold": "ECE <= 0.10, with >= 500 scored human and ai samples",
+      "passed": false,
+      "observed": "ECE=0.2581; not passable: requires >= 500 scored human and ai samples (have 4/4)"
+    },
+    {
+      "id": "G6_INDEPENDENT_SIGN_OFF",
+      "description": "Independent reviewer (not on the implementing team) has reviewed the dataset provenance, held-out protocol and results.",
+      "threshold": "Signed reviewer record supplied (reviewer, organization, date, reference)",
+      "passed": false,
+      "observed": "no sign-off supplied"
+    }
+  ],
+  "gatesPassed": false,
+  "caveats": [
+    "Metrics describe this dataset only; they are not evidence of accuracy on other populations or genres.",
+    "The harness cannot verify that the dataset is held out from tuning or independently sourced; that is the reviewer's responsibility (G6).",
+    "Samples that were not scored (too short / unsupported language) are excluded from AUROC, FPR and calibration.",
+    "Dataset has 12 samples; results have no evidentiary value for release decisions."
+  ]
+}
