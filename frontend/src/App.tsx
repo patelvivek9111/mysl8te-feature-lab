@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
-import { api, apiBlob, getToken, setToken, type AuthUser } from './api'
+import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { api, apiBlob, getToken, setToken, signOut, SESSION_EXPIRED_EVENT, type AuthUser } from './api'
 import { AiReviewCard, type AiAssessment } from './AiReviewCard'
 
 interface CourseSummary {
@@ -74,6 +74,11 @@ function saveUser(user: AuthUser | null): void {
 function Shell({ children }: { children: ReactNode }) {
   const user = useUser()
   const navigate = useNavigate()
+  useEffect(() => {
+    const onExpired = () => navigate('/login?expired=1', { replace: true })
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired)
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired)
+  }, [navigate])
   if (!getToken() || !user) return <Navigate to="/login" replace />
   return (
     <div className="shell">
@@ -81,7 +86,8 @@ function Shell({ children }: { children: ReactNode }) {
         <Link to="/" className="brand">Academic Review Lab</Link>
         <Notifications />
         <p className="role-pill">{user.role === 'TEACHER' ? 'Instructor' : 'Student'} · {user.name}</p>
-        <button className="ghost" onClick={() => { setToken(null); saveUser(null); navigate('/login') }}>Sign out</button>
+        <Link to="/account" className="ghost" data-testid="account-link">Account</Link>
+        <button className="ghost" onClick={async () => { await signOut(); navigate('/login') }}>Sign out</button>
       </header>
       <main>{children}</main>
     </div>
@@ -112,10 +118,13 @@ function Login() {
   const [email, setEmail] = useState('ada@demo.lab')
   const [password, setPassword] = useState('DemoTeacher!2026')
   const [error, setError] = useState('')
+  const [params] = useSearchParams()
+  const expired = params.has('expired')
   async function submit(event: FormEvent) {
     event.preventDefault()
     setError('')
     try {
+      setToken(null)
       const result = await api<{ token: string; user: AuthUser }>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
@@ -135,6 +144,7 @@ function Login() {
         <p>Review writing, leave anchored comments, grade with a rubric, and read overlap and writing-signal reports.</p>
         <label>Email<input data-testid="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" /></label>
         <label>Password<input data-testid="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
+        {expired && !error && <p className="notice" role="status" data-testid="session-expired">Your session ended. Sign in again.</p>}
         {error && <p className="error" role="alert">{error}</p>}
         <button data-testid="login-submit" type="submit">Sign in</button>
         <div className="demo-accounts">
@@ -560,12 +570,63 @@ function caretOffset(root: HTMLElement, node: Node, offset: number): number {
   return count
 }
 
+function Account() {
+  const navigate = useNavigate()
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  async function changePassword(event: FormEvent) {
+    event.preventDefault()
+    setMessage('')
+    setError('')
+    if (newPassword !== confirm) {
+      setError('The new passwords do not match')
+      return
+    }
+    try {
+      const result = await api<{ revokedOtherSessions: number }>('/api/auth/password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirm('')
+      setMessage(`Password changed. Signed out ${result.revokedOtherSessions} other session${result.revokedOtherSessions === 1 ? '' : 's'}.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change the password')
+    }
+  }
+  return (
+    <section>
+      <h1>Account</h1>
+      <form className="card account-card" onSubmit={changePassword}>
+        <h2>Change password</h2>
+        <p>Use at least 12 characters. Avoid common passwords and your own name or email. Changing it signs out your other sessions.</p>
+        <label>Current password<input data-testid="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" required /></label>
+        <label>New password<input data-testid="new-password" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={12} maxLength={200} required /></label>
+        <label>Confirm new password<input data-testid="confirm-password" type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} autoComplete="new-password" required /></label>
+        {error && <p className="error" role="alert">{error}</p>}
+        {message && <p className="notice" role="status" data-testid="password-changed">{message}</p>}
+        <button data-testid="change-password" type="submit">Change password</button>
+      </form>
+      <div className="card account-card">
+        <h2>Sessions</h2>
+        <p>Sign out on every device and browser, including this one.</p>
+        <button className="danger" data-testid="sign-out-everywhere" onClick={async () => { await signOut(true); navigate('/login') }}>Sign out everywhere</button>
+      </div>
+    </section>
+  )
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<Shell><Dashboard /></Shell>} />
+        <Route path="/account" element={<Shell><Account /></Shell>} />
         <Route path="/courses/:courseId" element={<Shell><CoursePage /></Shell>} />
         <Route path="/submissions/:submissionId" element={<Shell><Review /></Shell>} />
         <Route path="*" element={<Navigate to="/" replace />} />

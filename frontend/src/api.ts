@@ -16,6 +16,25 @@ export function setToken(token: string | null): void {
   else sessionStorage.removeItem(TOKEN_KEY);
 }
 
+export const SESSION_EXPIRED_EVENT = 'lab:session-expired';
+
+function expireSession(): void {
+  setToken(null);
+  sessionStorage.removeItem('lab_user');
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+}
+
+export async function signOut(everywhere = false): Promise<void> {
+  if (getToken()) {
+    await fetch(everywhere ? '/api/auth/logout-all' : '/api/auth/logout', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken()}` },
+    }).catch(() => undefined);
+  }
+  setToken(null);
+  sessionStorage.removeItem('lab_user');
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const token = getToken();
@@ -24,6 +43,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     headers.set('Content-Type', 'application/json');
   }
   const response = await fetch(path, { ...options, headers });
+  if (response.status === 401 && token) expireSession();
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(payload.error || 'Request failed');
@@ -39,6 +59,7 @@ export async function apiBlob(path: string): Promise<Blob> {
   const token = getToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(path, { headers });
+  if (response.status === 401 && token) expireSession();
   if (!response.ok) throw new Error('Download failed');
   return response.blob();
 }

@@ -5,7 +5,11 @@ import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import prisma from './db/prisma';
-import { signToken, verifyPassword, verifyToken, AuthUser } from './services/auth';
+import {
+  AuthUser, PASSWORD_MAX_LENGTH, createSession, destroySession, destroyUserSessions, hashPassword,
+  passwordPolicyErrors, purgeExpiredSessions, resolveSession, verifyPassword,
+} from './services/auth';
+import { FailureLimiter } from './services/rateLimit';
 import { canReadSubmission, loadSubmission, studentView, studiesCourse, teachesCourse } from './services/access';
 import { assertMagic, EXTENSION_TO_FORMAT, formatSupport, uploadDir } from './services/extract';
 import { buildSimilarityReport } from './services/similarity';
@@ -14,27 +18,42 @@ import { AnnotationType } from '@prisma/client';
 
 export interface AuthedRequest extends Request {
   user?: AuthUser;
+  sessionId?: string;
 }
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: Number(process.env.MAX_FILE_SIZE || 26_214_400) },
+  limits: { fileSize: Number(process.env.MAX_FILE_SIZE || 26_214_400), files: 1, fields: 20, fieldSize: 64 * 1024 },
 });
 
-function auth(req: AuthedRequest, res: Response, next: NextFunction): void {
-  const header = req.header('authorization');
-  const token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
-  if (!token) {
-    res.status(401).json({ error: 'Authentication required' });
-    return;
+const LOGIN_WINDOW_MS = Number(process.env.LOGIN_WINDOW_MS || 15 * 60 * 1000);
+export const loginLimiters = {
+  account: new FailureLimiter(Number(process.env.LOGIN_MAX_FAILURES || 10), LOGIN_WINDOW_MS),
+  address: new FailureLimiter(Number(process.env.LOGIN_MAX_FAILURES_PER_IP || 50), LOGIN_WINDOW_MS),
+};
+
+const EMAIL_MAX_LENGTH = 254;
+const INVALID_LOGIN = 'Email or password is incorrect';
+
+async function auth(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const header = req.header('authorization');
+    const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : undefined;
+    if (!token) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    const session = await resolveSession(token);
+    if (!session) {
+      res.status(401).json({ error: 'Invalid or expired session' });
+      return;
+    }
+    req.user = session.user;
+    req.sessionId = session.sessionId;
+    next();
+  } catch (error) {
+    next(error);
   }
-  const user = verifyToken(token);
-  if (!user) {
-    res.status(401).json({ error: 'Invalid or expired session' });
-    return;
-  }
-  req.user = user;
-  next();
 }
 
 async function courseMembers(courseId: string): Promise<{ teachers: string[]; students: string[] }> {
@@ -54,7 +73,15 @@ async function audit(userId: string | undefined, action: string, entity: string,
 
 export function createApp() {
   const app = express();
+  app.disable('x-powered-by');
   app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
     const started = Date.now();
@@ -77,16 +104,35 @@ export function createApp() {
 
   app.post('/api/auth/login', async (req, res, next) => {
     try {
-      const email = String(req.body.email || '').toLowerCase();
-      const password = String(req.body.password || '');
-      const user = await prisma.user.findUnique({ where: { email } });
-      if (!user || !verifyPassword(password, user.passwordHash)) {
-        res.status(401).json({ error: 'Email or password is incorrect' });
+      const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+      const password = typeof req.body?.password === 'string' ? req.body.password : '';
+      if (!email || !password || email.length > EMAIL_MAX_LENGTH || password.length > PASSWORD_MAX_LENGTH) {
+        res.status(400).json({ error: 'Email and password are required' });
         return;
       }
+      const ip = req.ip || req.socket.remoteAddress || 'unknown';
+      const accountKey = `${ip}|${email}`;
+      const retryAfter = Math.max(loginLimiters.address.retryAfterSeconds(ip), loginLimiters.account.retryAfterSeconds(accountKey));
+      if (retryAfter > 0) {
+        res.setHeader('Retry-After', String(retryAfter));
+        res.status(429).json({ error: 'Too many sign-in attempts. Try again later.' });
+        return;
+      }
+      const user = await prisma.user.findUnique({ where: { email } });
+      const ok = await verifyPassword(password, user?.passwordHash);
+      if (!user || !ok) {
+        loginLimiters.address.recordFailure(ip);
+        loginLimiters.account.recordFailure(accountKey);
+        await audit(user?.id, 'login_failed', 'user', user?.id ?? 'unknown');
+        res.status(401).json({ error: INVALID_LOGIN });
+        return;
+      }
+      loginLimiters.account.clear(accountKey);
       const authUser: AuthUser = { id: user.id, email: user.email, name: user.name, role: user.role };
+      const session = await createSession(user.id);
       await audit(user.id, 'login', 'user', user.id);
-      res.json({ token: signToken(authUser), user: authUser });
+      purgeExpiredSessions().catch(() => undefined);
+      res.json({ token: session.token, expiresAt: session.expiresAt.toISOString(), user: authUser });
     } catch (error) {
       next(error);
     }
@@ -94,6 +140,54 @@ export function createApp() {
 
   app.get('/api/auth/me', auth, async (req: AuthedRequest, res) => {
     res.json({ user: req.user });
+  });
+
+  app.post('/api/auth/logout', auth, async (req: AuthedRequest, res, next) => {
+    try {
+      await destroySession(req.sessionId!);
+      await audit(req.user!.id, 'logout', 'user', req.user!.id);
+      res.json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/auth/logout-all', auth, async (req: AuthedRequest, res, next) => {
+    try {
+      const revoked = await destroyUserSessions(req.user!.id);
+      await audit(req.user!.id, 'logout_all', 'user', req.user!.id, { revoked });
+      res.json({ ok: true, revoked });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/auth/password', auth, async (req: AuthedRequest, res, next) => {
+    try {
+      const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+      const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+      if (!currentPassword || currentPassword.length > PASSWORD_MAX_LENGTH) {
+        res.status(400).json({ error: 'Current password is required' });
+        return;
+      }
+      const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+      if (!user || !(await verifyPassword(currentPassword, user.passwordHash))) {
+        res.status(403).json({ error: 'Current password is incorrect' });
+        return;
+      }
+      const problems = passwordPolicyErrors(newPassword, { email: user.email, name: user.name });
+      if (newPassword === currentPassword) problems.push('Choose a password you have not just used');
+      if (problems.length) {
+        res.status(400).json({ error: problems.join('. '), details: problems });
+        return;
+      }
+      await prisma.user.update({ where: { id: user.id }, data: { passwordHash: hashPassword(newPassword) } });
+      const revoked = await destroyUserSessions(user.id, req.sessionId);
+      await audit(user.id, 'password_change', 'user', user.id, { revokedOtherSessions: revoked });
+      res.json({ ok: true, revokedOtherSessions: revoked });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.get('/api/notifications', auth, async (req: AuthedRequest, res, next) => {
@@ -600,7 +694,24 @@ export function createApp() {
     }
   });
 
-  app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
+
+  app.use((error: Error & { type?: string; code?: string }, _req: Request, res: Response, _next: NextFunction) => {
+    if (error.type === 'entity.parse.failed') {
+      res.status(400).json({ error: 'Malformed JSON body' });
+      return;
+    }
+    if (error.type === 'entity.too.large') {
+      res.status(413).json({ error: 'Request body too large' });
+      return;
+    }
+    if (error instanceof multer.MulterError) {
+      const tooLarge = error.code === 'LIMIT_FILE_SIZE' || error.code === 'LIMIT_FIELD_VALUE';
+      res.status(tooLarge ? 413 : 400).json({ error: tooLarge ? 'The upload is larger than the allowed size' : 'The upload request is not valid' });
+      return;
+    }
     console.error(JSON.stringify({ level: 'error', message: error.message }));
     res.status(500).json({ error: 'The server could not complete that request' });
   });
