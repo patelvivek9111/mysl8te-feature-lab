@@ -29,8 +29,10 @@ Fresh VM without install having run: `sudo apt-get install -y postgresql poppler
 
 ```bash
 cd backend && npm run typecheck && npm test     # 80 vitest unit + 33 node:test integration (PostgreSQL; needs poppler-utils)
-cd ../frontend && npm run build && npx playwright test   # 12 E2E with video, starts both servers
+cd ../frontend && npm run lint && npm run build && npx playwright test   # lint fails on warnings; 12 E2E with video, starts both servers
 ```
+
+CI (`.github/workflows/ci.yml`) runs the same steps on every PR and push to `main` against a fresh PostgreSQL 16 database. Check it with `gh run list --branch cursor/academic-review-lab-ba77`; a red run blocks the task it belongs to. Playwright videos are in the `playwright-results` artifact.
 
 Schema changes: edit `backend/prisma/schema.prisma`, then `npx prisma migrate dev --name <change>` and commit the new migration folder. `scripts/migrate.sh` baselines databases created by the old `db push`.
 

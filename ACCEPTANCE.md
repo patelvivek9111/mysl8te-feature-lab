@@ -8,6 +8,8 @@ Not accepted yet: hosted URL, full format matrix, glyph-accurate PDF annotations
 
 ## Independent reviews
 
+- **2026-11-18, CI workflow and Review effect review** (read-only subagent `bc-7e3a8ac1-04a6-50c2-8962-ceb7f32143fd`, scope: CI-1 commits). No high or medium findings; workflow permissions are read-only and use no secrets. Fixed in the same run: a late response for the previous submission could refill the grade form after switching; a failed preview fetch was never retried; the CI frontend build ran in development mode; consecutive pushes to `main` cancelled each other's runs. Open (low, SEC-2): pin actions to commit SHAs.
+
 - **2026-11-18, annotation threads and page markup review** (read-only subagent `bc-dbf472d5-2806-5b90-b293-e982eaf26b48`, scope: ANNOT-2 commits). No high findings and no draft or peer leakage (comments, notifications, page images, export). Fixed in the same run: unbounded concurrent `pdftoppm` renders and oversized page bitmaps (now a render semaphore and a 2000 px cap from the `pdfinfo` page size); annotation deletes removed student replies without an audit record (now audited in the same transaction); reply/delete races could orphan replies, bypass the author 409, or exceed the 200-reply cap (now row-locked on the annotation); drawing view hid the original PDF (now a collapsible original preview); author deletes skipped enrollment; publish overwrote earlier `publishedAt`; pointer and point-cap bugs. Re-review confirmed no high or medium issues. Open (low, ANNOT-3): notification writes outside the transaction, lock-wait timeouts surface as 500, per-user render queue fairness, lazy-load of the original PDF, page-cache eviction, keyboard drawing.
 - **2026-11-18, similarity overlay and paraphrase refresh review** (read-only subagent `bc-b50276f1-a160-5ac4-b0a5-e61fdd88f874`, scope: REVIEW-INT-2 commits). No high findings and no leakage to students. Fixed in the same run, with regression tests: the boot backfill re-matched old reports and could clear teacher reviews (now rewrites only excluded rows from text and stored options); a teacher review racing an AI rebuild could be overwritten with a 200 (now row-locked; the blocked review gets 409); overlay allocated one object per character (now an interval sweep); concurrent report rebuilds could hit a unique-key error (advisory lock); marks were mouse-only (screen-reader prefixes); stale layer and annotation capture in the similarity layer; null threshold accepted. Re-review confirmed the fixes. Open (low, REVIEW-INT-3): one lock across report rebuild and AI refresh, first-insert race, keyboard navigation between marks, quadratic sweep on very large span counts.
 - **2026-11-18, annotated PDF export review** (read-only subagent `bc-198da071-416f-5d3d-8e49-ba1f0b233426`, scope: PORT-PDF commits). No authorization or leakage findings (drafts, AI signals, and peer data never reach a student export). Fixed in the same run, with regression tests: long unspaced non-Latin runs (CJK, emoji) threw and returned 500 (high); quadratic layout on long words (43 s for one 300k-character word, now 0.2 s); quadratic mark drawing with per-call opacity state (45 s for 50 overlapping marks, now 0.2 s); no page cap on embedded originals (now 200); misleading fallback note; out-of-range page marks silently moved; rotated/cropped pages misplaced marks; unvalidated annotation coordinates (now 400). Re-review confirmed the fixes. Open (low): FREE_DRAW stroke data uncapped (teacher-only); export rendering runs on the request thread (move to a worker or cache in PERF-1).
@@ -26,7 +28,7 @@ The checklist below is the original bar. Unchecked items remain open.
 The mission is complete when ALL of these criteria are met:
 
 ### 1. Standalone Application Deployment ✅
-- [ ] Application installs from repository reproducibly
+- [x] Application installs from repository reproducibly (CI installs, migrates a fresh database, and runs every suite on each PR: `.github/workflows/ci.yml`)
 - [ ] All dependencies documented
 - [ ] Environment setup scripts work
 - [ ] Application starts without errors
@@ -131,9 +133,9 @@ The mission is complete when ALL of these criteria are met:
 **Verification**: Test each exclusion type, verify percentage changes
 
 ### 13. Automated Tests Pass
-- [ ] All unit tests pass
-- [ ] All integration tests pass
-- [ ] All E2E tests pass
+- [x] All unit tests pass (80, CI)
+- [x] All integration tests pass (33, CI)
+- [x] All E2E tests pass (12 Playwright, CI)
 - [ ] Test coverage ≥ 70% for critical paths
 - [ ] No flaky tests
 
