@@ -21,8 +21,13 @@ export async function loadSubmission(id: string) {
       assignment: { include: { course: true, rubric: { include: { criteria: { include: { ratings: true }, orderBy: { order: 'asc' } } } } } },
       grade: true,
       annotations: { include: { comments: true, createdBy: { select: { id: true, name: true, role: true } } }, orderBy: { createdAt: 'asc' } },
-      similarityReport: { include: { sources: { include: { passages: true } } } },
-      aiAssessment: true,
+      similarityReport: {
+        include: {
+          sources: { include: { passages: { orderBy: { startPosition: 'asc' } } }, orderBy: { similarityPercentage: 'desc' } },
+          excludedMatches: true,
+        },
+      },
+      aiAssessment: { include: { reviewedBy: { select: { id: true, name: true } } } },
     },
   });
 }
@@ -33,10 +38,18 @@ export function canReadSubmission(user: AuthUser, submission: NonNullable<Awaite
   return user.role === UserRole.STUDENT && submission.studentId === user.id && studentIds.includes(user.id);
 }
 
-export function studentView<T extends { grade: { isDraft: boolean } | null; annotations: Array<{ isDraft: boolean; comments: Array<{ isDraft: boolean }> }> }>(user: AuthUser, submission: T): T {
+type StudentVisible = {
+  grade: { isDraft: boolean } | null;
+  annotations: Array<{ isDraft: boolean; comments: Array<{ isDraft: boolean }> }>;
+  aiAssessment?: unknown;
+};
+
+// AI-writing signals are teacher-only (ADR-009): students never receive them, even after grades are published.
+export function studentView<T extends StudentVisible>(user: AuthUser, submission: T): T {
   if (user.role !== UserRole.STUDENT) return submission;
   return {
     ...submission,
+    aiAssessment: null,
     grade: submission.grade && !submission.grade.isDraft ? submission.grade : null,
     annotations: submission.annotations
       .filter((annotation) => !annotation.isDraft)

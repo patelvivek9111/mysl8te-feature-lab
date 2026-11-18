@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { api, apiBlob, getToken, setToken, type AuthUser } from './api'
+import { AiReviewCard, type AiAssessment } from './AiReviewCard'
 
 interface CourseSummary {
   id: string
@@ -55,16 +56,9 @@ interface SubmissionDetail {
   similarityReport: {
     overallSimilarity: number
     sources: Array<{ id: string; sourceName: string; sourceType: string; similarityPercentage: number; passages: Array<{ id: string; submissionText: string; matchType: string }> }>
+    excludedMatches: Array<{ id: string; reason: string }>
   } | null
-  aiAssessment: {
-    outcome: string
-    consequentialUseEnabled: boolean
-    humanReviewRequired: boolean
-    uncertainty: string
-    reasons: string[]
-    limitations: string
-    evaluation: { accuracy: number; falsePositiveRate: number; fixtureCount: number; note: string }
-  } | null
+  aiAssessment: AiAssessment | null
 }
 
 function useUser(): AuthUser | null {
@@ -497,24 +491,25 @@ function Review() {
               <p data-testid="similarity-score"><strong>{submission.similarityReport.overallSimilarity}%</strong> of words overlap included sources.</p>
               <ul className="plain">
                 {submission.similarityReport.sources.map((source) => (
-                  <li key={source.id}>{source.sourceName} · {source.similarityPercentage}% · {source.passages.length} passage{source.passages.length === 1 ? '' : 's'}</li>
+                  <li key={source.id} data-testid="similarity-source">
+                    {source.sourceName} · {source.similarityPercentage}% · {source.passages.length} passage{source.passages.length === 1 ? '' : 's'}
+                    <ul className="plain">
+                      {source.passages.slice(0, 3).map((passage) => (
+                        <li key={passage.id} className="note">{passage.matchType === 'NEAR_MATCH' ? 'Near match' : 'Exact'}: “{passage.submissionText.length > 140 ? `${passage.submissionText.slice(0, 140)}…` : passage.submissionText}”</li>
+                      ))}
+                    </ul>
+                  </li>
                 ))}
               </ul>
+              {submission.similarityReport.excludedMatches.length > 0 && (
+                <p className="note" data-testid="similarity-excluded">
+                  Excluded from matching: {[...new Set(submission.similarityReport.excludedMatches.map((item) => item.reason.toLowerCase()))].join(', ')}.
+                </p>
+              )}
             </>
           ) : <p>Report not ready.</p>}
         </div>
-        <div className="card warning" data-testid="ai-report">
-          <h2>Writing-signal review</h2>
-          <p>Experimental. Not proof of AI authorship. Consequential use is disabled. A person must read the work.</p>
-          {submission.aiAssessment ? (
-            <>
-              <p data-testid="ai-outcome"><strong>{submission.aiAssessment.outcome}</strong> · uncertainty {submission.aiAssessment.uncertainty}</p>
-              <ul className="plain">{submission.aiAssessment.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-              <p>{submission.aiAssessment.limitations}</p>
-              <p>Synthetic fixture accuracy {submission.aiAssessment.evaluation.accuracy} on {submission.aiAssessment.evaluation.fixtureCount} items. {submission.aiAssessment.evaluation.note}</p>
-            </>
-          ) : <p>Assessment not ready.</p>}
-        </div>
+        {teacher && <AiReviewCard submissionId={submission.id} assessment={submission.aiAssessment} onSaved={reload} />}
         {error && <p className="error">{error}</p>}
       </aside>
     </section>

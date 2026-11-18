@@ -9,6 +9,7 @@ import { signToken, verifyPassword, verifyToken, AuthUser } from './services/aut
 import { canReadSubmission, loadSubmission, studentView, studiesCourse, teachesCourse } from './services/access';
 import { assertMagic, EXTENSION_TO_FORMAT, formatSupport, uploadDir } from './services/extract';
 import { buildSimilarityReport } from './services/similarity';
+import { REVIEW_DECISIONS } from './services/aiAssessment';
 import { AnnotationType } from '@prisma/client';
 
 export interface AuthedRequest extends Request {
@@ -515,6 +516,43 @@ export function createApp() {
       });
       const report = await prisma.similarityReport.findUnique({ where: { submissionId: submission.id }, include: { sources: { include: { passages: true } } } });
       res.json({ report, disclosure: 'Similarity is an overlap percentage against the lab corpus and other submissions in this assignment. It is not proof of plagiarism and it is not a Turnitin score.' });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/submissions/:id/ai-assessment/review', auth, async (req: AuthedRequest, res, next) => {
+    try {
+      const submission = await loadSubmission(req.params.id);
+      if (!submission) {
+        res.status(404).json({ error: 'Submission not found' });
+        return;
+      }
+      if (!(await teachesCourse(req.user!.id, submission.assignment.courseId))) {
+        res.status(403).json({ error: 'Only the teacher can review a writing-signal assessment' });
+        return;
+      }
+      if (!submission.aiAssessment) {
+        res.status(409).json({ error: 'The assessment is not ready yet' });
+        return;
+      }
+      const decision = String(req.body?.decision ?? '');
+      const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+      if (!(REVIEW_DECISIONS as readonly string[]).includes(decision)) {
+        res.status(400).json({ error: `decision must be one of ${REVIEW_DECISIONS.join(', ')}` });
+        return;
+      }
+      if (note.length < 10 || note.length > 4000) {
+        res.status(400).json({ error: 'A review note of 10 to 4000 characters is required' });
+        return;
+      }
+      const reviewed = await prisma.aiAssessment.update({
+        where: { submissionId: submission.id },
+        data: { reviewDecision: decision, reviewNote: note, reviewedById: req.user!.id, reviewedAt: new Date() },
+        include: { reviewedBy: { select: { id: true, name: true } } },
+      });
+      await audit(req.user!.id, 'ai_review', 'submission', submission.id);
+      res.json({ aiAssessment: reviewed });
     } catch (error) {
       next(error);
     }

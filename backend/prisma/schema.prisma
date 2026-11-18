@@ -35,6 +35,7 @@ model User {
   comments          Comment[]
   grades            Grade[]
   createdAssignments Assignment[]
+  aiReviews         AiAssessment[] @relation("AiAssessmentReviewer")
   
   @@map("users")
 }
@@ -591,6 +592,13 @@ model AiAssessment {
   features Json?
   limitations String @db.Text
   evaluation Json?
+
+  // Mandatory teacher review: the signal is never acted on without a recorded decision and note.
+  reviewDecision String? @map("review_decision")
+  reviewNote String? @db.Text @map("review_note")
+  reviewedById String? @map("reviewed_by_id")
+  reviewedBy User? @relation("AiAssessmentReviewer", fields: [reviewedById], references: [id])
+  reviewedAt DateTime? @map("reviewed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

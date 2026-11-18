@@ -8,6 +8,7 @@ import path from 'path';
 import { createApp } from './app';
 import { seedDemo, DEMO_ACCOUNTS } from './seed';
 import { processNextJob } from './worker';
+import { refreshStaleAnalyses } from './services/aiAssessment';
 import prisma from './db/prisma';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
@@ -37,6 +38,7 @@ async function json(path: string, token: string, options: RequestInit = {}) {
 
 test.before(async () => {
   await seedDemo();
+  await refreshStaleAnalyses();
   const app = createApp();
   server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
@@ -96,8 +98,7 @@ test('students cannot see drafts or other students, and published feedback is vi
   assert.equal(visible.body.submission.grade.isDraft, false);
   assert.equal(visible.body.submission.annotations.some((item: { content: string }) => item.content === secret), true);
   assert.ok(visible.body.submission.similarityReport.overallSimilarity > 15);
-  assert.equal(visible.body.submission.aiAssessment.consequentialUseEnabled, false);
-  assert.equal(visible.body.submission.aiAssessment.humanReviewRequired, true);
+  assert.equal(visible.body.submission.aiAssessment, null);
 
   const reset = await fetch(`${base}/api/test/reset`, { method: 'POST' });
   assert.equal(reset.status, 404);
@@ -190,5 +191,75 @@ test('a student upload is processed in the background', async () => {
   const submission = await json(`/api/submissions/${created.submissionId}`, alan);
   assert.equal(submission.body.submission.document.processingStatus, 'COMPLETED');
   assert.match(submission.body.submission.document.textContent, /margin marks/);
-  assert.equal(submission.body.submission.aiAssessment.consequentialUseEnabled, false);
+  assert.equal(submission.body.submission.aiAssessment, null);
+
+  const teacher = await login(DEMO_ACCOUNTS.teacher.email, DEMO_ACCOUNTS.teacher.password);
+  const teacherView = await json(`/api/submissions/${created.submissionId}`, teacher);
+  assert.equal(teacherView.body.submission.aiAssessment.consequentialUseEnabled, false);
+  assert.equal(teacherView.body.submission.aiAssessment.outcome, 'INSUFFICIENT_TEXT');
+});
+
+test('similarity passages are character spans of the submission, and bibliography is excluded', async () => {
+  const teacher = await login(DEMO_ACCOUNTS.teacher.email, DEMO_ACCOUNTS.teacher.password);
+  const courses = await json('/api/courses', teacher);
+  const course = await json(`/api/courses/${courses.body.courses[0].id}`, teacher);
+  const assignment = course.body.course.assignments.find((item: { title: string }) => item.title === 'Opening paragraph close reading');
+  const submissionId = assignment.submissions[0].id as string;
+  const defaults = await json(`/api/submissions/${submissionId}/similarity/recalculate`, teacher, { method: 'POST', body: '{}' });
+  assert.equal(defaults.status, 200);
+  const view = await json(`/api/submissions/${submissionId}`, teacher);
+  const { document, similarityReport } = view.body.submission;
+  const austen = similarityReport.sources.find((source: { sourceName: string }) => source.sourceName.startsWith('Pride and Prejudice'));
+  assert.ok(austen, 'the seeded Austen opening is attributed to the reference source');
+  assert.equal(austen.sourceType, 'PUBLICATION');
+  for (const passage of austen.passages) {
+    assert.equal(document.textContent.slice(passage.startPosition, passage.endPosition), passage.submissionText);
+    assert.ok(passage.sourceText.length > 0);
+  }
+  assert.equal(similarityReport.excludedMatches.some((item: { reason: string; text: string }) => item.reason === 'BIBLIOGRAPHY' && /Austen, Jane/.test(item.text)), true);
+
+  const recalculated = await json(`/api/submissions/${submissionId}/similarity/recalculate`, teacher, {
+    method: 'POST',
+    body: JSON.stringify({ excludeBibliography: false, excludeSmallMatches: true, smallMatchThreshold: 8 }),
+  });
+  assert.equal(recalculated.status, 200);
+  assert.equal(recalculated.body.report.excludeBibliography, false);
+  assert.ok(recalculated.body.report.overallSimilarity >= similarityReport.overallSimilarity);
+  const restored = await json(`/api/submissions/${submissionId}/similarity/recalculate`, teacher, { method: 'POST', body: '{}' });
+  assert.equal(restored.body.report.excludeBibliography, true);
+});
+
+test('AI-writing review requires the course teacher, a known decision, and a note', async () => {
+  const teacher = await login(DEMO_ACCOUNTS.teacher.email, DEMO_ACCOUNTS.teacher.password);
+  const grace = await login(DEMO_ACCOUNTS.grace.email, DEMO_ACCOUNTS.grace.password);
+  const courses = await json('/api/courses', teacher);
+  const course = await json(`/api/courses/${courses.body.courses[0].id}`, teacher);
+  const assignment = course.body.course.assignments.find((item: { title: string }) => item.title === 'Opening paragraph close reading');
+  const submissionId = assignment.submissions[0].id as string;
+  const path = `/api/submissions/${submissionId}/ai-assessment/review`;
+
+  const before = await json(`/api/submissions/${submissionId}`, teacher);
+  const assessment = before.body.submission.aiAssessment;
+  assert.equal(assessment.humanReviewRequired, true);
+  assert.equal(assessment.evaluation.validated, false);
+  assert.equal(assessment.evaluation.stage, 'EXPERIMENTAL');
+  assert.match(assessment.limitations, /Not evidence of misconduct/);
+  assert.match(assessment.features.modelVersion, /experimental/);
+
+  const student = await json(path, grace, { method: 'POST', body: JSON.stringify({ decision: 'NO_CONCERN', note: 'I reviewed my own work.' }) });
+  assert.equal(student.status, 403);
+  const badDecision = await json(path, teacher, { method: 'POST', body: JSON.stringify({ decision: 'AI_WROTE_IT', note: 'Long enough note here.' }) });
+  assert.equal(badDecision.status, 400);
+  const noNote = await json(path, teacher, { method: 'POST', body: JSON.stringify({ decision: 'NO_CONCERN', note: ' ' }) });
+  assert.equal(noNote.status, 400);
+  const ok = await json(path, teacher, {
+    method: 'POST',
+    body: JSON.stringify({ decision: 'SIGNAL_NOT_RELIABLE', note: 'Essay is mostly a quoted opening line; the signal is not meaningful.' }),
+  });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.aiAssessment.reviewDecision, 'SIGNAL_NOT_RELIABLE');
+  assert.equal(ok.body.aiAssessment.reviewedBy.name, DEMO_ACCOUNTS.teacher.name);
+
+  const studentView = await json(`/api/submissions/${submissionId}`, grace);
+  assert.equal(studentView.body.submission.aiAssessment, null);
 });

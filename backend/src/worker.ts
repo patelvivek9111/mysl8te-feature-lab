@@ -1,5 +1,5 @@
 import prisma from './db/prisma';
-import { assessText, evaluateFixtures } from './services/aiAssessment';
+import { storeAiAssessment } from './services/aiAssessment';
 import { extractDocument } from './services/extract';
 import { buildSimilarityReport } from './services/similarity';
 import path from 'path';
@@ -28,35 +28,8 @@ export async function processNextJob(): Promise<boolean> {
           metadata: { previewKind: extracted.previewKind, note: extracted.note },
         },
       });
-      await buildSimilarityReport(payload.submissionId);
-      const assessment = extracted.text ? assessText(extracted.text) : assessText('');
-      const evaluation = evaluateFixtures();
-      await prisma.aiAssessment.upsert({
-        where: { submissionId: payload.submissionId },
-        update: {
-          status: 'COMPLETED',
-          outcome: assessment.outcome,
-          consequentialUseEnabled: false,
-          humanReviewRequired: true,
-          uncertainty: assessment.uncertainty,
-          reasons: assessment.reasons,
-          features: JSON.parse(JSON.stringify(assessment.features)),
-          limitations: assessment.limitations,
-          evaluation: JSON.parse(JSON.stringify(evaluation)),
-        },
-        create: {
-          submissionId: payload.submissionId,
-          status: 'COMPLETED',
-          outcome: assessment.outcome,
-          consequentialUseEnabled: false,
-          humanReviewRequired: true,
-          uncertainty: assessment.uncertainty,
-          reasons: assessment.reasons,
-          features: JSON.parse(JSON.stringify(assessment.features)),
-          limitations: assessment.limitations,
-          evaluation: JSON.parse(JSON.stringify(evaluation)),
-        },
-      });
+      const similarity = await buildSimilarityReport(payload.submissionId);
+      await storeAiAssessment(payload.submissionId, extracted.text ?? '', similarity);
       await prisma.submission.update({ where: { id: payload.submissionId }, data: { status: 'SUBMITTED' } });
       const submission = await prisma.submission.findUnique({
         where: { id: payload.submissionId },

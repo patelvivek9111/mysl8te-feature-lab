@@ -3,7 +3,7 @@ import path from 'path';
 import prisma from './db/prisma';
 import { hashPassword } from './services/auth';
 import { uploadDir } from './services/extract';
-import { assessText, evaluateFixtures } from './services/aiAssessment';
+import { storeAiAssessment } from './services/aiAssessment';
 import { buildSimilarityReport } from './services/similarity';
 
 export const DEMO_ACCOUNTS = {
@@ -194,22 +194,8 @@ export async function seedDemo(): Promise<void> {
         version: 1,
       },
     });
-    await buildSimilarityReport(submission.id);
-    const assessment = assessText(GRACE_ESSAY);
-    await prisma.aiAssessment.create({
-      data: {
-        submissionId: submission.id,
-        status: 'COMPLETED',
-        outcome: assessment.outcome,
-        consequentialUseEnabled: false,
-        humanReviewRequired: true,
-        uncertainty: assessment.uncertainty,
-        reasons: assessment.reasons,
-        features: JSON.parse(JSON.stringify(assessment.features)),
-        limitations: assessment.limitations,
-        evaluation: JSON.parse(JSON.stringify(evaluateFixtures())),
-      },
-    });
+    const similarity = await buildSimilarityReport(submission.id);
+    await storeAiAssessment(submission.id, GRACE_ESSAY, similarity);
     await prisma.annotation.create({
       data: {
         documentId: document.id,

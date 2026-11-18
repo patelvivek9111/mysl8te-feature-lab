@@ -10,8 +10,16 @@ test('teacher publishes feedback and the student can read it', async ({ page }) 
   await expect(page.getByRole('heading', { name: 'Reading Public-Domain Prose' })).toBeVisible();
   await page.getByRole('link', { name: /Open version/ }).first().click();
   await expect(page.getByTestId('similarity-score')).toContainText('%');
-  await expect(page.getByTestId('ai-report')).toContainText('Consequential use is disabled');
+  await expect(page.getByTestId('similarity-source').first()).toContainText('Pride and Prejudice');
+  await expect(page.getByTestId('similarity-excluded')).toContainText('bibliography');
   await expect(page.getByTestId('ai-report')).toContainText('Not proof of AI authorship');
+  await expect(page.getByTestId('ai-release-stage')).toContainText('EXPERIMENTAL');
+  await expect(page.getByTestId('ai-review-save')).toBeDisabled();
+  await page.getByTestId('ai-review-decision').selectOption('NO_CONCERN');
+  await page.getByTestId('ai-review-note').fill('Read the full response; the voice matches earlier in-class writing.');
+  await page.getByTestId('ai-review-save').click();
+  await expect(page.getByTestId('ai-review-recorded')).toContainText('Ada Lovelace');
+  await expect(page.getByTestId('ai-review-recorded')).toContainText('No concern after reading the work');
   await page.getByTestId('document-text').evaluate((root) => {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const node = walker.nextNode();
@@ -45,6 +53,7 @@ test('teacher publishes feedback and the student can read it', async ({ page }) 
   await expect(page.getByTestId('published-grade')).toContainText('The quotation is specific');
   await expect(page.getByText('Draft is hidden from the student.')).toHaveCount(0);
   await expect(page.getByTestId('document-text')).toContainText('truth universally acknowledged');
+  await expect(page.getByTestId('ai-report')).toHaveCount(0);
 });
 
 test('student uploads a text file and sees processing complete', async ({ page }) => {
@@ -62,5 +71,6 @@ test('student uploads a text file and sees processing complete', async ({ page }
   await card.getByRole('button', { name: 'Upload' }).click();
   await expect(page.getByTestId('processing-status')).toContainText('COMPLETED', { timeout: 15000 });
   await expect(page.getByTestId('document-text')).toContainText('library visit');
-  await expect(page.getByTestId('ai-report')).toContainText('Not proof of AI authorship');
+  await expect(page.getByTestId('similarity-report')).toBeVisible();
+  await expect(page.getByTestId('ai-report')).toHaveCount(0);
 });
