@@ -76,6 +76,7 @@ interface SubmissionDetail {
     format: string
     processingStatus: string
     processingError: string | null
+    pageCount: number | null
     textContent: string | null
     metadata: { previewKind?: string; note?: string } | null
   }
@@ -394,7 +395,7 @@ function Review() {
   useEffect(() => {
     const preview = data?.submission.document.metadata?.previewKind
     const drawable = (data?.markablePages ?? 0) > 0 && data?.submission.document.processingStatus === 'COMPLETED'
-    if (!data || drawable || (preview !== 'pdf' && preview !== 'image' && preview !== 'audio' && preview !== 'video')) {
+    if (!data || (drawable && preview !== 'pdf') || (preview !== 'pdf' && preview !== 'image' && preview !== 'audio' && preview !== 'video')) {
       setMediaUrl(null)
       return
     }
@@ -544,6 +545,12 @@ function Review() {
             comment={comment}
             onSaved={reload}
           />
+        )}
+        {pageMarkup && mediaUrl && submission.document.metadata?.previewKind === 'pdf' && (
+          <details className="original-pdf" data-testid="original-pdf">
+            <summary>Original PDF{(submission.document.pageCount ?? 0) > data.markablePages ? ` (pages after ${data.markablePages} are only shown here)` : ''}</summary>
+            <iframe title="PDF preview" className="pdf-frame" src={mediaUrl} />
+          </details>
         )}
         {!pageMarkup && mediaUrl && submission.document.metadata?.previewKind === 'pdf' && <iframe title="PDF preview" className="pdf-frame" src={mediaUrl} />}
         {!pageMarkup && mediaUrl && submission.document.metadata?.previewKind === 'image' && <img alt="Uploaded image preview" className="image-preview" src={mediaUrl} />}

@@ -17,7 +17,7 @@ import { REVIEW_DECISIONS, refreshAfterSimilarity } from './services/aiAssessmen
 import { renderFeedbackPdf } from './services/pdfExport';
 import { COMMENT_MAX_LENGTH, THREAD_MAX_COMMENTS, commentContent, parseStrokeData, strokeBounds, threadDescendants, threadOrder } from './services/annotationInput';
 import { markablePages, pageImage } from './services/pageImage';
-import { AnnotationType } from '@prisma/client';
+import { AnnotationType, Prisma } from '@prisma/client';
 
 export interface AuthedRequest extends Request {
   user?: AuthUser;
@@ -75,6 +75,15 @@ async function courseMembers(courseId: string): Promise<{ teachers: string[]; st
     teachers: course?.teachers.map((row) => row.userId) ?? [],
     students: course?.students.map((row) => row.userId) ?? [],
   };
+}
+
+type Refusal = { refused: true; status: number; error: string };
+const refusal = (status: number, error: string): Refusal => ({ refused: true, status, error });
+
+// Serializes thread writes per annotation so subtree deletes, author checks, and the reply cap see a stable thread.
+async function lockAnnotation(tx: Prisma.TransactionClient, id: string): Promise<{ isDraft: boolean } | null> {
+  const rows = await tx.$queryRaw<Array<{ is_draft: boolean }>>`SELECT is_draft FROM annotations WHERE id = ${id} FOR UPDATE`;
+  return rows[0] ? { isDraft: rows[0].is_draft } : null;
 }
 
 async function audit(userId: string | undefined, action: string, entity: string, entityId: string, changes?: unknown): Promise<void> {
@@ -573,6 +582,14 @@ export function createApp() {
         res.status(400).json({ error: 'An area needs a positive width and height inside the page' });
         return;
       }
+      if (coords.x + (coords.width ?? 0) > 100 || coords.y + (coords.height ?? 0) > 100) {
+        res.status(400).json({ error: 'The annotation must fit inside the page' });
+        return;
+      }
+      if (req.body.anchor !== undefined && JSON.stringify(req.body.anchor).length > 2000) {
+        res.status(400).json({ error: 'The annotation anchor is too large' });
+        return;
+      }
       if ((type === 'FREE_DRAW' || (type === 'AREA' && req.body.width !== undefined)) && page > markablePages(submission.document)) {
         res.status(400).json({ error: 'That page cannot be drawn on for this file' });
         return;
@@ -610,9 +627,20 @@ export function createApp() {
         res.status(403).json({ error: 'You cannot delete this annotation' });
         return;
       }
-      await prisma.comment.deleteMany({ where: { annotationId: annotation.id } });
-      await prisma.annotation.delete({ where: { id: annotation.id } });
-      res.json({ deleted: true });
+      const removed = await prisma.$transaction(async (tx) => {
+        await lockAnnotation(tx, annotation.id);
+        const comments = await tx.comment.findMany({ where: { annotationId: annotation.id }, select: { id: true, createdById: true, content: true } });
+        await tx.comment.deleteMany({ where: { annotationId: annotation.id } });
+        await tx.annotation.delete({ where: { id: annotation.id } });
+        return comments;
+      });
+      await audit(req.user!.id, 'delete_annotation', 'annotation', annotation.id, {
+        submissionId: annotation.submissionId,
+        type: annotation.type,
+        content: annotation.content,
+        removedComments: removed,
+      });
+      res.json({ deleted: true, removedComments: removed.length });
     } catch (error) {
       next(error);
     }
@@ -625,7 +653,7 @@ export function createApp() {
       const user = req.user!;
       const annotation = await prisma.annotation.findUnique({
         where: { id: req.params.id },
-        include: { submission: { include: { assignment: true } }, comments: { select: { id: true, isDraft: true } } },
+        include: { submission: { include: { assignment: true } } },
       });
       const courseId = annotation?.submission.assignment.courseId ?? '';
       const asTeacher = Boolean(annotation) && user.role === 'TEACHER' && await teachesCourse(user.id, courseId);
@@ -641,30 +669,35 @@ export function createApp() {
         return;
       }
       const parentId = req.body?.parentId === undefined || req.body?.parentId === null ? null : String(req.body.parentId);
-      if (parentId) {
-        const parent = annotation.comments.find((comment) => comment.id === parentId);
-        if (!parent || (asStudent && parent.isDraft)) {
-          res.status(400).json({ error: 'The reply must answer a comment on this annotation' });
-          return;
+      const result = await prisma.$transaction(async (tx) => {
+        const locked = await lockAnnotation(tx, annotation.id);
+        if (!locked || (asStudent && locked.isDraft)) return refusal(404, 'Annotation not found');
+        const thread = await tx.comment.findMany({ where: { annotationId: annotation.id }, select: { id: true, isDraft: true } });
+        if (parentId) {
+          const parent = thread.find((comment) => comment.id === parentId);
+          if (!parent || (asStudent && parent.isDraft)) return refusal(400, 'The reply must answer a comment on this annotation');
         }
-      }
-      if (annotation.comments.length >= THREAD_MAX_COMMENTS) {
-        res.status(409).json({ error: `This thread already has ${THREAD_MAX_COMMENTS} replies` });
+        if (thread.length >= THREAD_MAX_COMMENTS) return refusal(409, `This thread already has ${THREAD_MAX_COMMENTS} replies`);
+        const isDraft = asTeacher ? locked.isDraft : false;
+        const comment = await tx.comment.create({
+          data: {
+            annotationId: annotation.id,
+            submissionId: annotation.submissionId,
+            createdById: user.id,
+            content,
+            parentId,
+            isDraft,
+            publishedAt: isDraft ? null : new Date(),
+          },
+          include: { createdBy: { select: { id: true, name: true, role: true } } },
+        });
+        return { comment, isDraft };
+      });
+      if ('refused' in result) {
+        res.status(result.status).json({ error: result.error });
         return;
       }
-      const isDraft = asTeacher ? annotation.isDraft : false;
-      const comment = await prisma.comment.create({
-        data: {
-          annotationId: annotation.id,
-          submissionId: annotation.submissionId,
-          createdById: user.id,
-          content,
-          parentId,
-          isDraft,
-          publishedAt: isDraft ? null : new Date(),
-        },
-        include: { createdBy: { select: { id: true, name: true, role: true } } },
-      });
+      const { comment, isDraft } = result;
       const recipients = asStudent ? (await courseMembers(courseId)).teachers : isDraft ? [] : [annotation.submission.studentId];
       if (recipients.length) {
         await prisma.notification.createMany({
@@ -691,20 +724,30 @@ export function createApp() {
       const comment = await prisma.comment.findUnique({ where: { id: req.params.id }, include: { annotation: { include: { submission: { include: { assignment: true } } } } } });
       const courseId = comment?.annotation?.submission.assignment.courseId;
       const teacher = Boolean(courseId) && user.role === 'TEACHER' && await teachesCourse(user.id, courseId!);
-      const owner = comment?.createdById === user.id;
+      const owner = Boolean(courseId) && comment?.createdById === user.id && user.role === 'STUDENT'
+        && comment.annotation?.submission.studentId === user.id && await studiesCourse(user.id, courseId!);
       if (!comment || !comment.annotationId || (!teacher && !owner)) {
         res.status(404).json({ error: 'Comment not found' });
         return;
       }
-      const thread = await prisma.comment.findMany({ where: { annotationId: comment.annotationId }, select: { id: true, parentId: true, createdById: true } });
-      const ids = threadDescendants(comment.id, thread);
-      if (!teacher && thread.some((row) => ids.includes(row.id) && row.createdById !== user.id)) {
-        res.status(409).json({ error: 'Others have replied to this comment, so only the teacher can remove it' });
+      const annotationId = comment.annotationId;
+      const result = await prisma.$transaction(async (tx) => {
+        await lockAnnotation(tx, annotationId);
+        const thread = await tx.comment.findMany({ where: { annotationId }, select: { id: true, parentId: true, createdById: true } });
+        if (!thread.some((row) => row.id === comment.id)) return refusal(404, 'Comment not found');
+        const ids = threadDescendants(comment.id, thread);
+        if (!teacher && thread.some((row) => ids.includes(row.id) && row.createdById !== user.id)) {
+          return refusal(409, 'This comment has replies, so only the teacher can remove it');
+        }
+        await tx.comment.deleteMany({ where: { id: { in: ids } } });
+        return { ids };
+      });
+      if ('refused' in result) {
+        res.status(result.status).json({ error: result.error });
         return;
       }
-      await prisma.comment.deleteMany({ where: { id: { in: ids } } });
-      await audit(user.id, 'delete_comment', 'comment', comment.id, { annotationId: comment.annotationId, removed: ids.length, content: comment.content });
-      res.json({ deleted: ids.length });
+      await audit(user.id, 'delete_comment', 'comment', comment.id, { annotationId, removed: result.ids.length, content: comment.content });
+      res.json({ deleted: result.ids.length });
     } catch (error) {
       next(error);
     }
@@ -787,8 +830,8 @@ export function createApp() {
         },
       });
       if (publish) {
-        await prisma.annotation.updateMany({ where: { submissionId: submission.id }, data: { isDraft: false, publishedAt: new Date() } });
-        await prisma.comment.updateMany({ where: { submissionId: submission.id }, data: { isDraft: false, publishedAt: new Date() } });
+        await prisma.annotation.updateMany({ where: { submissionId: submission.id, isDraft: true }, data: { isDraft: false, publishedAt: new Date() } });
+        await prisma.comment.updateMany({ where: { submissionId: submission.id, isDraft: true }, data: { isDraft: false, publishedAt: new Date() } });
         await prisma.submission.update({ where: { id: submission.id }, data: { status: 'RETURNED' } });
         await prisma.notification.create({
           data: {

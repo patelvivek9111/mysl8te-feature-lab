@@ -123,10 +123,14 @@ test('teacher draws an area box and a freehand mark on a PDF page', async ({ pag
   await page.goto(submissionUrl);
   await expect(page.getByRole('img', { name: 'Page 1 of the submission' })).toBeVisible();
   const overlay = page.getByTestId('page-overlay');
-  const box = (await overlay.boundingBox())!;
-  expect(box.width).toBeGreaterThan(200);
+  const overlayBox = async () => {
+    await overlay.scrollIntoViewIfNeeded();
+    return (await overlay.boundingBox())!;
+  };
 
   await page.getByTestId('annotation-comment').fill('This heading needs a source.');
+  let box = await overlayBox();
+  expect(box.width).toBeGreaterThan(200);
   await page.mouse.move(box.x + box.width * 0.05, box.y + box.height * 0.1);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.3, { steps: 5 });
@@ -137,6 +141,7 @@ test('teacher draws an area box and a freehand mark on a PDF page', async ({ pag
 
   await page.getByTestId('tool-freehand').check();
   await page.getByTestId('annotation-comment').fill('Circle the claim.');
+  box = await overlayBox();
   await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.7);
   await page.mouse.down();
   for (const [x, y] of [[0.3, 0.8], [0.45, 0.75], [0.5, 0.6], [0.35, 0.55], [0.2, 0.7]]) {
@@ -156,4 +161,6 @@ test('teacher draws an area box and a freehand mark on a PDF page', async ({ pag
   expect(Number(await area.getAttribute('width'))).toBeCloseTo(55, 0);
   await expect(page.getByTestId('thread').filter({ hasText: 'This heading needs a source.' })).toContainText('Area on page 1');
   await expect(page.getByTestId('thread').filter({ hasText: 'Circle the claim.' })).toContainText('Drawing on page 1');
+  await page.getByTestId('original-pdf').locator('summary').click();
+  await expect(page.getByTitle('PDF preview')).toBeVisible();
 });

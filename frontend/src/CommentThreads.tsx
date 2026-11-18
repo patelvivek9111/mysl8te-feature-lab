@@ -115,7 +115,7 @@ function Replies({ comments, parentId, depth, userId, teacher, canReply, onReply
   const level = comments.filter((comment) => parentId === null
     ? !comment.parentId || !ids.has(comment.parentId)
     : comment.parentId === parentId)
-  if (level.length === 0 || depth > 20) return null
+  if (level.length === 0) return null
   return (
     <ul className="replies">
       {level.map((comment) => (

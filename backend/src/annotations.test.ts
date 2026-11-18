@@ -9,6 +9,7 @@ import { createApp } from './app';
 import { seedDemo, DEMO_ACCOUNTS } from './seed';
 import { processNextJob } from './worker';
 import { hashPassword } from './services/auth';
+import { uploadDir } from './services/extract';
 import prisma from './db/prisma';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
@@ -148,6 +149,15 @@ test('teacher and student reply in threads; drafts stay hidden and each side is 
 
     const own = await post(route, grace, { content: 'Second thought, never mind.' });
     assert.deepEqual((await json(`/api/comments/${own.body.comment.id}`, grace, { method: 'DELETE' })).body, { deleted: 1 });
+
+    const kept = await post(route, grace, { content: 'Keep this in the record.' });
+    assert.equal(kept.status, 201);
+    const deleted = await json(`/api/annotations/${annotationId}`, teacher, { method: 'DELETE' });
+    assert.deepEqual(deleted.body, { deleted: true, removedComments: 2 });
+    const record = await prisma.auditLog.findFirst({ where: { action: 'delete_annotation', entityId: annotationId } });
+    const removedComments = (record?.changes as { removedComments?: Array<{ content: string; createdById: string }> } | null)?.removedComments ?? [];
+    assert.equal(removedComments.some((row) => row.content === 'Keep this in the record.' && row.createdById === graceId), true);
+    assert.equal((await post(route, teacher, { content: 'Too late' })).status, 404);
   } finally {
     await json(`/api/annotations/${annotationId}`, teacher, { method: 'DELETE' });
     await json(`/api/annotations/${other.body.annotation.id}`, teacher, { method: 'DELETE' });
@@ -283,4 +293,15 @@ test('PDF and image pages render for drawing, with access checks and stroke vali
 
   const exported = await fetch(`${base}/api/submissions/${pdfId}/export`, { headers: { Authorization: `Bearer ${teacher}` } });
   assert.equal(exported.status, 200);
+
+  const hugeId = await upload(alan, Buffer.from(ONE_PAGE_PDF.replace('[0 0 300 144]', '[0 0 14400 7200]')), 'poster.pdf', 'application/pdf');
+  const huge = await json(`/api/submissions/${hugeId}`, teacher);
+  const [one, two] = await Promise.all([page(huge.body.submission.document.id, 1, teacher), page(huge.body.submission.document.id, 1, teacher)]);
+  assert.deepEqual([one.status, two.status], [200, 200]);
+  const header = Buffer.from(await one.arrayBuffer());
+  await two.arrayBuffer();
+  const [width, height] = [header.readUInt32BE(16), header.readUInt32BE(20)];
+  assert.ok(Math.max(width, height) <= 2000 && Math.max(width, height) >= 1900, `rendered ${width}x${height}`);
+  const cached = await fs.readdir(path.join(uploadDir(), 'pages'));
+  assert.equal(cached.some((name) => name.includes('.tmp-')), false);
 });

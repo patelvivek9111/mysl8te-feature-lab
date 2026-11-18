@@ -29,6 +29,8 @@ function parseStrokes(strokeData: string | null): Point[][] {
   }
 }
 
+const countPoints = (strokes: Point[][]) => strokes.reduce((sum, stroke) => sum + stroke.length, 0)
+
 const polyline = (points: Point[]) => points.map((point) => `${point.x},${point.y}`).join(' ')
 
 function isPageAnnotation(annotation: { type: string; anchor: { kind: string } | null; width: number | null }): boolean {
@@ -79,26 +81,33 @@ export function PageMarkup({ submissionId, documentId, pages, annotations, teach
     setStrokes([])
   }
 
+  function confirmDiscard(): boolean {
+    if (!pending) return true
+    if (!window.confirm('Discard the unsaved markup on this page?')) return false
+    discard()
+    return true
+  }
+
   function toPoint(event: PointerEvent<SVGSVGElement>): Point {
     const rect = svgRef.current!.getBoundingClientRect()
     const clamp = (value: number) => Math.round(Math.max(0, Math.min(100, value)) * 100) / 100
     return { x: clamp(((event.clientX - rect.left) / rect.width) * 100), y: clamp(((event.clientY - rect.top) / rect.height) * 100) }
   }
 
-  const pointCount = strokes.reduce((sum, stroke) => sum + stroke.length, 0)
+  const pointCount = countPoints(strokes)
 
   function down(event: PointerEvent<SVGSVGElement>) {
-    if (!teacher) return
+    if (!teacher || !event.isPrimary || event.button !== 0) return
     event.preventDefault()
     svgRef.current?.setPointerCapture?.(event.pointerId)
     drawing.current = true
     const point = toPoint(event)
     if (tool === 'AREA') setArea({ from: point, to: point })
-    else if (pointCount < MAX_POINTS && strokes.length < 50) setStrokes((current) => [...current, [point]])
+    else setStrokes((current) => current.length < 50 && countPoints(current) < MAX_POINTS ? [...current, [point]] : current)
   }
 
   function move(event: PointerEvent<SVGSVGElement>) {
-    if (!drawing.current) return
+    if (!drawing.current || !event.isPrimary) return
     const point = toPoint(event)
     if (tool === 'AREA') {
       setArea((current) => current && { ...current, to: point })
@@ -106,7 +115,7 @@ export function PageMarkup({ submissionId, documentId, pages, annotations, teach
     }
     setStrokes((current) => {
       const last = current[current.length - 1]
-      if (!last || pointCount >= MAX_POINTS) return current
+      if (!last || countPoints(current) >= MAX_POINTS) return current
       const previous = last[last.length - 1]
       if (Math.hypot(point.x - previous.x, point.y - previous.y) < 0.4) return current
       return [...current.slice(0, -1), [...last, point]]
@@ -150,7 +159,7 @@ export function PageMarkup({ submissionId, documentId, pages, annotations, teach
       <div className="page-toolbar">
         {pages > 1 && (
           <label>Page
-            <select data-testid="markup-page" value={page} onChange={(event) => { discard(); setPage(Number(event.target.value)) }}>
+            <select data-testid="markup-page" value={page} onChange={(event) => { if (confirmDiscard()) setPage(Number(event.target.value)) }}>
               {Array.from({ length: pages }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} of {pages}</option>)}
             </select>
           </label>
@@ -158,8 +167,8 @@ export function PageMarkup({ submissionId, documentId, pages, annotations, teach
         {teacher && (
           <fieldset className="layer-toggle">
             <legend>Draw on the page</legend>
-            <label><input type="radio" name="markup-tool" data-testid="tool-area" checked={tool === 'AREA'} onChange={() => { discard(); setTool('AREA') }} /> Area box</label>
-            <label><input type="radio" name="markup-tool" data-testid="tool-freehand" checked={tool === 'FREE_DRAW'} onChange={() => { discard(); setTool('FREE_DRAW') }} /> Freehand</label>
+            <label><input type="radio" name="markup-tool" data-testid="tool-area" checked={tool === 'AREA'} onChange={() => { if (confirmDiscard()) setTool('AREA') }} /> Area box</label>
+            <label><input type="radio" name="markup-tool" data-testid="tool-freehand" checked={tool === 'FREE_DRAW'} onChange={() => { if (confirmDiscard()) setTool('FREE_DRAW') }} /> Freehand</label>
           </fieldset>
         )}
       </div>
