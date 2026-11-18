@@ -628,18 +628,22 @@ export function createApp() {
         return;
       }
       const removed = await prisma.$transaction(async (tx) => {
-        await lockAnnotation(tx, annotation.id);
+        if (!(await lockAnnotation(tx, annotation.id))) return null;
         const comments = await tx.comment.findMany({ where: { annotationId: annotation.id }, select: { id: true, createdById: true, content: true } });
         await tx.comment.deleteMany({ where: { annotationId: annotation.id } });
         await tx.annotation.delete({ where: { id: annotation.id } });
+        await tx.auditLog.create({
+          data: {
+            userId: req.user!.id, action: 'delete_annotation', entity: 'annotation', entityId: annotation.id,
+            changes: { submissionId: annotation.submissionId, type: annotation.type, content: annotation.content, removedComments: comments },
+          },
+        });
         return comments;
       });
-      await audit(req.user!.id, 'delete_annotation', 'annotation', annotation.id, {
-        submissionId: annotation.submissionId,
-        type: annotation.type,
-        content: annotation.content,
-        removedComments: removed,
-      });
+      if (!removed) {
+        res.status(404).json({ error: 'Annotation not found' });
+        return;
+      }
       res.json({ deleted: true, removedComments: removed.length });
     } catch (error) {
       next(error);
@@ -691,6 +695,7 @@ export function createApp() {
           },
           include: { createdBy: { select: { id: true, name: true, role: true } } },
         });
+        await tx.auditLog.create({ data: { userId: user.id, action: 'comment', entity: 'comment', entityId: comment.id, changes: { annotationId: annotation.id, parentId, isDraft } } });
         return { comment, isDraft };
       });
       if ('refused' in result) {
@@ -711,7 +716,6 @@ export function createApp() {
           })),
         });
       }
-      await audit(user.id, 'comment', 'comment', comment.id, { annotationId: annotation.id, parentId, isDraft });
       res.status(201).json({ comment });
     } catch (error) {
       next(error);
@@ -740,13 +744,13 @@ export function createApp() {
           return refusal(409, 'This comment has replies, so only the teacher can remove it');
         }
         await tx.comment.deleteMany({ where: { id: { in: ids } } });
+        await tx.auditLog.create({ data: { userId: user.id, action: 'delete_comment', entity: 'comment', entityId: comment.id, changes: { annotationId, removed: ids.length, content: comment.content } } });
         return { ids };
       });
       if ('refused' in result) {
         res.status(result.status).json({ error: result.error });
         return;
       }
-      await audit(user.id, 'delete_comment', 'comment', comment.id, { annotationId, removed: result.ids.length, content: comment.content });
       res.json({ deleted: result.ids.length });
     } catch (error) {
       next(error);

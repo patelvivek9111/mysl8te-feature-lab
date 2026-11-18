@@ -11,7 +11,8 @@ export const PAGE_RENDER_DPI = 110;
 export const PAGE_RENDER_LIMIT = 200;
 /** Longest side in pixels, so an oversized page box cannot allocate a huge bitmap. */
 export const PAGE_RENDER_MAX_PIXELS = 2000;
-const MAX_CONCURRENT_RENDERS = Math.max(1, Number(process.env.PAGE_RENDER_CONCURRENCY || 2));
+const configuredRenders = Number(process.env.PAGE_RENDER_CONCURRENCY);
+const MAX_CONCURRENT_RENDERS = Number.isInteger(configuredRenders) && configuredRenders >= 1 ? configuredRenders : 2;
 
 let running = 0;
 const waiting: Array<() => void> = [];
