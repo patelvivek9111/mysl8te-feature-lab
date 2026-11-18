@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run",
-    "test:integration": "node --import tsx --test --test-concurrency=1 src/extract.test.ts src/product.test.ts src/auth.test.ts",
+    "test:integration": "node --import tsx --test --test-concurrency=1 src/extract.test.ts src/product.test.ts src/auth.test.ts src/annotations.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "eval:ai-writing": "tsx scripts/eval-ai-writing.ts",
     "db:migrate": "prisma migrate deploy",

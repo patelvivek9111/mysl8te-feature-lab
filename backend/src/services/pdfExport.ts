@@ -17,7 +17,8 @@ export interface ExportAnnotation {
   anchor: unknown;
   isDraft: boolean;
   authorName: string;
-  replies: Array<{ authorName: string; content: string; isDraft: boolean }>;
+  /** In thread order (each reply after its parent); depth 0 answers the annotation itself. */
+  replies: Array<{ authorName: string; content: string; isDraft: boolean; depth?: number }>;
 }
 
 export interface ExportInput {
@@ -398,7 +399,9 @@ export async function renderFeedbackPdf(input: ExportInput): Promise<Uint8Array>
     w.text(`#${index + 1} ${TYPE_LABELS[annotation.type] ?? annotation.type} - ${annotation.authorName}${annotation.isDraft ? ' (draft)' : ''}`, { bold: true, indent: 10 });
     w.text(placement[index], { indent: 20, size: 9, color: MUTED });
     if (annotation.content) w.text(annotation.content, { indent: 20 });
-    for (const reply of annotation.replies) w.text(`${reply.authorName}${reply.isDraft ? ' (draft)' : ''}: ${reply.content}`, { indent: 30, size: 9 });
+    for (const reply of annotation.replies) {
+      w.text(`${reply.authorName}${reply.isDraft ? ' (draft)' : ''}: ${reply.content}`, { indent: 30 + 12 * Math.min(reply.depth ?? 0, 4), size: 9 });
+    }
   });
 
   let copied: PDFPage[] = [];

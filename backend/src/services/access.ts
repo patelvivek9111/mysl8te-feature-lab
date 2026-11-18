@@ -20,7 +20,7 @@ export async function loadSubmission(id: string) {
       document: true,
       assignment: { include: { course: true, rubric: { include: { criteria: { include: { ratings: true }, orderBy: { order: 'asc' } } } } } },
       grade: true,
-      annotations: { include: { comments: true, createdBy: { select: { id: true, name: true, role: true } } }, orderBy: { createdAt: 'asc' } },
+      annotations: { include: { comments: { include: { createdBy: { select: { id: true, name: true, role: true } } }, orderBy: { createdAt: 'asc' } }, createdBy: { select: { id: true, name: true, role: true } } }, orderBy: { createdAt: 'asc' } },
       similarityReport: {
         include: {
           sources: { include: { passages: { orderBy: { startPosition: 'asc' } } }, orderBy: { similarityPercentage: 'desc' } },

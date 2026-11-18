@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, apiBlob, getToken, setToken, signOut, SESSION_EXPIRED_EVENT, type AuthUser } from './api'
 import { AiReviewCard, type AiAssessment } from './AiReviewCard'
+import { CommentThreads, type ThreadComment } from './CommentThreads'
+import { PageMarkup } from './PageMarkup'
 
 interface CourseSummary {
   id: string
@@ -29,11 +31,18 @@ interface TextAnchor { kind: 'text'; start: number; end: number }
 interface Annotation {
   id: string
   type: string
+  page: number
+  x: number
+  y: number
+  width: number | null
+  height: number | null
   content: string | null
   color: string | null
+  strokeData: string | null
   isDraft: boolean
   anchor: TextAnchor | { kind: string } | null
   createdBy: { name: string }
+  comments: ThreadComment[]
 }
 
 interface SimilarityReportView {
@@ -77,6 +86,12 @@ interface SubmissionDetail {
   aiAssessment: AiAssessment | null
 }
 
+interface ReviewData {
+  submission: SubmissionDetail
+  navigation: Array<{ id: string; version: number; student: { id: string; name: string } }>
+  markablePages: number
+}
+
 function useUser(): AuthUser | null {
   const raw = sessionStorage.getItem('lab_user')
   return raw ? JSON.parse(raw) as AuthUser : null
@@ -110,21 +125,52 @@ function Shell({ children }: { children: ReactNode }) {
   )
 }
 
+interface NotificationItem { id: string; title: string; message: string; read: boolean; relatedEntity: string | null; relatedEntityId: string | null }
+
 function Notifications() {
-  const [items, setItems] = useState<Array<{ id: string; title: string; message: string; read: boolean }>>([])
-  useEffect(() => {
-    api<{ notifications: Array<{ id: string; title: string; message: string; read: boolean }> }>('/api/notifications')
+  const [items, setItems] = useState<NotificationItem[]>([])
+  const [error, setError] = useState('')
+  const navigate = useNavigate()
+  function load() {
+    api<{ notifications: NotificationItem[] }>('/api/notifications')
       .then((data) => setItems(data.notifications))
       .catch(() => setItems([]))
-  }, [])
+  }
+  useEffect(load, [])
+  async function markRead(path: string) {
+    setError('')
+    try {
+      await api(path, { method: 'POST' })
+      load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update notifications')
+    }
+  }
   const unread = items.filter((item) => !item.read).length
   return (
-    <details className="notifications">
+    <details className="notifications" onToggle={(event) => { if ((event.target as HTMLDetailsElement).open) load() }}>
       <summary data-testid="notifications">{unread} unread</summary>
-      <ul>
-        {items.slice(0, 6).map((item) => <li key={item.id}><strong>{item.title}</strong> {item.message}</li>)}
-        {items.length === 0 && <li>No notifications.</li>}
-      </ul>
+      <div className="notification-panel">
+        {unread > 0 && <button type="button" className="link-button" data-testid="mark-all-read" onClick={() => markRead('/api/notifications/read-all')}>Mark all read</button>}
+        <ul>
+          {items.slice(0, 8).map((item) => (
+            <li key={item.id} className={item.read ? 'read' : 'unread'} data-testid="notification">
+              <strong>{item.title}</strong> {item.message}
+              <span className="notification-actions">
+                {item.relatedEntity === 'submission' && item.relatedEntityId && (
+                  <button type="button" className="link-button" onClick={() => {
+                    if (!item.read) markRead(`/api/notifications/${item.id}/read`)
+                    navigate(`/submissions/${item.relatedEntityId}`)
+                  }}>Open</button>
+                )}
+                {!item.read && <button type="button" className="link-button" data-testid="mark-read" onClick={() => markRead(`/api/notifications/${item.id}/read`)}>Mark read<span className="sr-only">: {item.title}</span></button>}
+              </span>
+            </li>
+          ))}
+          {items.length === 0 && <li>No notifications.</li>}
+        </ul>
+        {error && <p className="error" role="alert">{error}</p>}
+      </div>
     </details>
   )
 }
@@ -307,7 +353,7 @@ function Review() {
   const textRef = useRef<HTMLDivElement>(null)
   const gradeDirty = useRef(false)
   const pendingAnchor = useRef<TextAnchor | null>(null)
-  const [data, setData] = useState<{ submission: SubmissionDetail; navigation: Array<{ id: string; version: number; student: { id: string; name: string } }> } | null>(null)
+  const [data, setData] = useState<ReviewData | null>(null)
   const [score, setScore] = useState('')
   const [feedback, setFeedback] = useState('')
   const [rubricScores, setRubricScores] = useState<Record<string, number>>({})
@@ -323,7 +369,7 @@ function Review() {
   const recalcMessage = recalcNotice?.submissionId === submissionId ? recalcNotice.text : ''
 
   async function reload() {
-    const next = await api<{ submission: SubmissionDetail; navigation: Array<{ id: string; version: number; student: { id: string; name: string } }> }>(`/api/submissions/${submissionId}`)
+    const next = await api<ReviewData>(`/api/submissions/${submissionId}`)
     setData(next)
     if (!gradeDirty.current) {
       setScore(next.submission.grade ? String(next.submission.grade.score) : '')
@@ -347,7 +393,8 @@ function Review() {
 
   useEffect(() => {
     const preview = data?.submission.document.metadata?.previewKind
-    if (!data || (preview !== 'pdf' && preview !== 'image' && preview !== 'audio' && preview !== 'video')) {
+    const drawable = (data?.markablePages ?? 0) > 0 && data?.submission.document.processingStatus === 'COMPLETED'
+    if (!data || drawable || (preview !== 'pdf' && preview !== 'image' && preview !== 'audio' && preview !== 'video')) {
       setMediaUrl(null)
       return
     }
@@ -357,7 +404,7 @@ function Review() {
       setMediaUrl(url)
     }).catch(() => setMediaUrl(null))
     return () => { if (url) URL.revokeObjectURL(url) }
-  }, [data?.submission.document.id, data?.submission.document.metadata?.previewKind])
+  }, [data?.submission.document.id, data?.submission.document.metadata?.previewKind, data?.markablePages, data?.submission.document.processingStatus])
 
   const text = data?.submission.document.textContent ?? ''
   const showSimilarity = layer === 'similarity' && Boolean(data?.submission.similarityReport)
@@ -368,6 +415,7 @@ function Review() {
   if (!data) return <p>Loading submission…</p>
   const submission = data.submission
   const teacher = user?.role === 'TEACHER'
+  const pageMarkup = data.markablePages > 0 && submission.document.processingStatus === 'COMPLETED'
   const report = submission.similarityReport
   const options = similarityOptions ?? (report ? {
     excludeQuotes: report.excludeQuotes,
@@ -411,7 +459,7 @@ function Review() {
     pendingAnchor.current = selectionAnchor(textRef.current, text)
   }
 
-  async function annotate(type: 'HIGHLIGHT' | 'UNDERLINE' | 'POINT') {
+  async function annotate(type: 'HIGHLIGHT' | 'UNDERLINE' | 'STRIKEOUT' | 'POINT') {
     const anchor = pendingAnchor.current ?? selectionAnchor(textRef.current, text)
     if (!anchor) {
       setError('Select a passage in the document first.')
@@ -419,11 +467,16 @@ function Review() {
     }
     pendingAnchor.current = null
     const content = comment.trim()
-    await api(`/api/submissions/${submission.id}/annotations`, {
-      method: 'POST',
-      body: JSON.stringify({ type, content, anchor, color: type === 'UNDERLINE' ? '#2a6f97' : '#f2c14e' }),
-    })
-    await reload()
+    setError('')
+    try {
+      await api(`/api/submissions/${submission.id}/annotations`, {
+        method: 'POST',
+        body: JSON.stringify({ type, content, anchor, color: ANNOTATION_COLORS[type] }),
+      })
+      await reload()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the annotation')
+    }
   }
 
   function chooseRating(criterionId: string, points: number) {
@@ -475,13 +528,25 @@ function Review() {
             <div className="button-row">
               <button data-testid="highlight" disabled={showSimilarity} onClick={() => annotate('HIGHLIGHT')}>Highlight selection</button>
               <button data-testid="underline" disabled={showSimilarity} onClick={() => annotate('UNDERLINE')}>Underline selection</button>
+              <button data-testid="strikeout" disabled={showSimilarity} onClick={() => annotate('STRIKEOUT')}>Strike through selection</button>
               <button disabled={showSimilarity} onClick={() => annotate('POINT')}>Comment on selection</button>
             </div>
             {showSimilarity && <p className="note">Switch to the annotations layer to add highlights and comments.</p>}
           </>
         )}
-        {mediaUrl && submission.document.metadata?.previewKind === 'pdf' && <iframe title="PDF preview" className="pdf-frame" src={mediaUrl} />}
-        {mediaUrl && submission.document.metadata?.previewKind === 'image' && <img alt="Uploaded image preview" className="image-preview" src={mediaUrl} />}
+        {pageMarkup && (
+          <PageMarkup
+            submissionId={submission.id}
+            documentId={submission.document.id}
+            pages={data.markablePages}
+            annotations={submission.annotations}
+            teacher={teacher}
+            comment={comment}
+            onSaved={reload}
+          />
+        )}
+        {!pageMarkup && mediaUrl && submission.document.metadata?.previewKind === 'pdf' && <iframe title="PDF preview" className="pdf-frame" src={mediaUrl} />}
+        {!pageMarkup && mediaUrl && submission.document.metadata?.previewKind === 'image' && <img alt="Uploaded image preview" className="image-preview" src={mediaUrl} />}
         {mediaUrl && submission.document.metadata?.previewKind === 'audio' && <audio controls src={mediaUrl} />}
         {mediaUrl && submission.document.metadata?.previewKind === 'video' && <video controls className="image-preview" src={mediaUrl} />}
         {text && (
@@ -517,6 +582,14 @@ function Review() {
           link.click()
           URL.revokeObjectURL(url)
         }}>Download annotated feedback (PDF)</a>
+        <CommentThreads
+          annotations={submission.annotations}
+          text={text}
+          userId={user?.id ?? ''}
+          teacher={teacher}
+          canReply={teacher || user?.role === 'STUDENT'}
+          onChanged={reload}
+        />
       </div>
       <aside className="side">
         {teacher && students.size > 1 && (
@@ -623,9 +696,18 @@ function Review() {
 const MARK_CLASSES: Record<string, string> = {
   HIGHLIGHT: 'highlight',
   UNDERLINE: 'underline',
+  STRIKEOUT: 'strikeout',
+  POINT: 'point',
   'match-exact': 'match-exact',
   'match-near': 'match-near',
   excluded: 'excluded',
+}
+
+const ANNOTATION_COLORS: Record<string, string> = {
+  HIGHLIGHT: '#f2c14e',
+  UNDERLINE: '#2a6f97',
+  STRIKEOUT: '#c0392b',
+  POINT: '#f2c14e',
 }
 
 const EXCLUSION_LABELS: Record<string, string> = {

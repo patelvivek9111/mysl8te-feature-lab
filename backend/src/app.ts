@@ -15,6 +15,8 @@ import { assertMagic, EXTENSION_TO_FORMAT, formatSupport, uploadDir } from './se
 import { buildSimilarityReport } from './services/similarity';
 import { REVIEW_DECISIONS, refreshAfterSimilarity } from './services/aiAssessment';
 import { renderFeedbackPdf } from './services/pdfExport';
+import { COMMENT_MAX_LENGTH, THREAD_MAX_COMMENTS, commentContent, parseStrokeData, strokeBounds, threadDescendants, threadOrder } from './services/annotationInput';
+import { markablePages, pageImage } from './services/pageImage';
 import { AnnotationType } from '@prisma/client';
 
 export interface AuthedRequest extends Request {
@@ -256,6 +258,18 @@ export function createApp() {
     }
   });
 
+  app.post('/api/notifications/read-all', auth, async (req: AuthedRequest, res, next) => {
+    try {
+      const updated = await prisma.notification.updateMany({
+        where: { userId: req.user!.id, read: false },
+        data: { read: true, readAt: new Date() },
+      });
+      res.json({ updated: updated.count });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/api/courses', auth, async (req: AuthedRequest, res, next) => {
     try {
       const user = req.user!;
@@ -473,7 +487,7 @@ export function createApp() {
           orderBy: [{ student: { name: 'asc' } }, { version: 'desc' }],
           include: { student: { select: { id: true, name: true } } },
         });
-      res.json({ submission: studentView(req.user!, submission), navigation: siblings });
+      res.json({ submission: studentView(req.user!, submission), navigation: siblings, markablePages: markablePages(submission.document) });
     } catch (error) {
       next(error);
     }
@@ -523,12 +537,44 @@ export function createApp() {
       }
       const type = String(req.body.type || 'HIGHLIGHT') as AnnotationType;
       const percent = (value: unknown) => (value === undefined || value === null ? null : Number(value));
-      const coords = { x: percent(req.body.x) ?? 0, y: percent(req.body.y) ?? 0, width: percent(req.body.width), height: percent(req.body.height) };
+      let coords = { x: percent(req.body.x) ?? 0, y: percent(req.body.y) ?? 0, width: percent(req.body.width), height: percent(req.body.height) };
       const page = req.body.page === undefined ? 1 : Number(req.body.page);
       if (!Object.values(AnnotationType).includes(type)
         || !Number.isInteger(page) || page < 1 || page > 100_000
         || Object.values(coords).some((value) => value !== null && !(Number.isFinite(value) && value >= 0 && value <= 100))) {
         res.status(400).json({ error: 'Annotation type, page, or position is not valid' });
+        return;
+      }
+      const content = req.body.content === undefined || req.body.content === null || req.body.content === '' ? null : commentContent(req.body.content);
+      if (content === null && req.body.content !== undefined && req.body.content !== null && req.body.content !== '') {
+        res.status(400).json({ error: `Comments must be text of at most ${COMMENT_MAX_LENGTH} characters` });
+        return;
+      }
+      const color = req.body.color === undefined || req.body.color === null ? '#f2c14e' : String(req.body.color);
+      if (!/^#[0-9a-fA-F]{6}$/.test(color)) {
+        res.status(400).json({ error: 'Color must be a #rrggbb value' });
+        return;
+      }
+      let strokeData: string | null = null;
+      if (type === 'FREE_DRAW') {
+        const strokes = parseStrokeData(req.body.strokeData);
+        if ('error' in strokes) {
+          res.status(400).json({ error: strokes.error });
+          return;
+        }
+        strokeData = JSON.stringify(strokes.paths);
+        coords = strokeBounds(strokes.paths);
+      } else if (req.body.strokeData !== undefined && req.body.strokeData !== null) {
+        res.status(400).json({ error: 'Only drawings carry stroke data' });
+        return;
+      }
+      if (type === 'AREA' && (req.body.width !== undefined || req.body.height !== undefined)
+        && !(coords.width && coords.height && coords.x + coords.width <= 100 && coords.y + coords.height <= 100)) {
+        res.status(400).json({ error: 'An area needs a positive width and height inside the page' });
+        return;
+      }
+      if ((type === 'FREE_DRAW' || (type === 'AREA' && req.body.width !== undefined)) && page > markablePages(submission.document)) {
+        res.status(400).json({ error: 'That page cannot be drawn on for this file' });
         return;
       }
       const annotation = await prisma.annotation.create({
@@ -539,9 +585,9 @@ export function createApp() {
           type,
           page,
           ...coords,
-          content: req.body.content ? String(req.body.content) : null,
-          color: req.body.color ? String(req.body.color) : '#f2c14e',
-          strokeData: req.body.strokeData ? String(req.body.strokeData) : null,
+          content,
+          color,
+          strokeData,
           anchor: req.body.anchor ?? undefined,
           isDraft: true,
         },
@@ -567,6 +613,130 @@ export function createApp() {
       await prisma.comment.deleteMany({ where: { annotationId: annotation.id } });
       await prisma.annotation.delete({ where: { id: annotation.id } });
       res.json({ deleted: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Teachers reply on any annotation (draft until feedback is published); the submitting student replies
+  // only on published annotations, and their replies are visible to the teacher at once.
+  app.post('/api/annotations/:id/comments', auth, async (req: AuthedRequest, res, next) => {
+    try {
+      const user = req.user!;
+      const annotation = await prisma.annotation.findUnique({
+        where: { id: req.params.id },
+        include: { submission: { include: { assignment: true } }, comments: { select: { id: true, isDraft: true } } },
+      });
+      const courseId = annotation?.submission.assignment.courseId ?? '';
+      const asTeacher = Boolean(annotation) && user.role === 'TEACHER' && await teachesCourse(user.id, courseId);
+      const asStudent = Boolean(annotation) && user.role === 'STUDENT' && annotation!.submission.studentId === user.id
+        && !annotation!.isDraft && await studiesCourse(user.id, courseId);
+      if (!annotation || (!asTeacher && !asStudent)) {
+        res.status(404).json({ error: 'Annotation not found' });
+        return;
+      }
+      const content = commentContent(req.body?.content);
+      if (!content) {
+        res.status(400).json({ error: `A reply of 1 to ${COMMENT_MAX_LENGTH} characters is required` });
+        return;
+      }
+      const parentId = req.body?.parentId === undefined || req.body?.parentId === null ? null : String(req.body.parentId);
+      if (parentId) {
+        const parent = annotation.comments.find((comment) => comment.id === parentId);
+        if (!parent || (asStudent && parent.isDraft)) {
+          res.status(400).json({ error: 'The reply must answer a comment on this annotation' });
+          return;
+        }
+      }
+      if (annotation.comments.length >= THREAD_MAX_COMMENTS) {
+        res.status(409).json({ error: `This thread already has ${THREAD_MAX_COMMENTS} replies` });
+        return;
+      }
+      const isDraft = asTeacher ? annotation.isDraft : false;
+      const comment = await prisma.comment.create({
+        data: {
+          annotationId: annotation.id,
+          submissionId: annotation.submissionId,
+          createdById: user.id,
+          content,
+          parentId,
+          isDraft,
+          publishedAt: isDraft ? null : new Date(),
+        },
+        include: { createdBy: { select: { id: true, name: true, role: true } } },
+      });
+      const recipients = asStudent ? (await courseMembers(courseId)).teachers : isDraft ? [] : [annotation.submission.studentId];
+      if (recipients.length) {
+        await prisma.notification.createMany({
+          data: recipients.map((userId) => ({
+            userId,
+            type: 'COMMENT_ADDED' as const,
+            title: asStudent ? `${user.name} replied to feedback` : 'New reply on your feedback',
+            message: annotation.submission.assignment.title,
+            relatedEntity: 'submission',
+            relatedEntityId: annotation.submissionId,
+          })),
+        });
+      }
+      await audit(user.id, 'comment', 'comment', comment.id, { annotationId: annotation.id, parentId, isDraft });
+      res.status(201).json({ comment });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete('/api/comments/:id', auth, async (req: AuthedRequest, res, next) => {
+    try {
+      const user = req.user!;
+      const comment = await prisma.comment.findUnique({ where: { id: req.params.id }, include: { annotation: { include: { submission: { include: { assignment: true } } } } } });
+      const courseId = comment?.annotation?.submission.assignment.courseId;
+      const teacher = Boolean(courseId) && user.role === 'TEACHER' && await teachesCourse(user.id, courseId!);
+      const owner = comment?.createdById === user.id;
+      if (!comment || !comment.annotationId || (!teacher && !owner)) {
+        res.status(404).json({ error: 'Comment not found' });
+        return;
+      }
+      const thread = await prisma.comment.findMany({ where: { annotationId: comment.annotationId }, select: { id: true, parentId: true, createdById: true } });
+      const ids = threadDescendants(comment.id, thread);
+      if (!teacher && thread.some((row) => ids.includes(row.id) && row.createdById !== user.id)) {
+        res.status(409).json({ error: 'Others have replied to this comment, so only the teacher can remove it' });
+        return;
+      }
+      await prisma.comment.deleteMany({ where: { id: { in: ids } } });
+      await audit(user.id, 'delete_comment', 'comment', comment.id, { annotationId: comment.annotationId, removed: ids.length, content: comment.content });
+      res.json({ deleted: ids.length });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/documents/:id/pages/:page', auth, async (req: AuthedRequest, res, next) => {
+    try {
+      const document = await prisma.document.findUnique({ where: { id: req.params.id }, include: { submissions: { select: { id: true }, take: 1 } } });
+      const submission = document?.submissions[0] ? await loadSubmission(document.submissions[0].id) : null;
+      if (!document || !submission) {
+        res.status(404).json({ error: 'Page not found' });
+        return;
+      }
+      const members = await courseMembers(submission.assignment.courseId);
+      if (!canReadSubmission(req.user!, submission, members.teachers, members.students)) {
+        res.status(403).json({ error: 'You cannot view this file' });
+        return;
+      }
+      if (document.processingStatus !== 'COMPLETED') {
+        res.status(409).json({ error: 'The file is still being processed' });
+        return;
+      }
+      const image = await pageImage(document, Number(req.params.page)).catch(() => undefined);
+      if (image === undefined) {
+        res.status(422).json({ error: 'This page could not be rendered' });
+        return;
+      }
+      if (!image) {
+        res.status(404).json({ error: 'Page not found' });
+        return;
+      }
+      res.type(image.contentType).sendFile(image.filePath);
     } catch (error) {
       next(error);
     }
@@ -742,9 +912,6 @@ export function createApp() {
         return;
       }
       const visible = studentView(req.user!, submission);
-      const replyAuthorIds = [...new Set(visible.annotations.flatMap((annotation) => annotation.comments.map((comment) => comment.createdById)))];
-      const replyAuthors = new Map((await prisma.user.findMany({ where: { id: { in: replyAuthorIds } }, select: { id: true, name: true } }))
-        .map((user) => [user.id, user.name]));
       let originalPdf: Uint8Array | null = null;
       if (submission.document.format === 'PDF') {
         originalPdf = await fs.readFile(path.join(uploadDir(), submission.document.storedFilename)).catch(() => null);
@@ -771,10 +938,8 @@ export function createApp() {
         annotations: visible.annotations.map((annotation) => ({
           ...annotation,
           authorName: annotation.createdBy.name,
-          replies: annotation.comments
-            .slice()
-            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-            .map((comment) => ({ authorName: replyAuthors.get(comment.createdById) ?? 'Unknown', content: comment.content, isDraft: comment.isDraft })),
+          replies: threadOrder(annotation.comments)
+            .map((comment) => ({ authorName: comment.createdBy.name, content: comment.content, isDraft: comment.isDraft, depth: comment.depth })),
         })),
       });
       await audit(req.user!.id, 'export_feedback', 'submission', submission.id);
