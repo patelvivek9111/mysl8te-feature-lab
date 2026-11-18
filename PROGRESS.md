@@ -1,18 +1,16 @@
 # Progress
 
-**Last updated**: 2026-10-18  
+**Last updated**: 2026-11-18  
 **Release status**: not accepted
 
 | Area | State |
 | --- | --- |
-| Research and schema from PR #2 | Kept and extended |
-| Cloud install/start from PR #3 | Kept; start script now boots Postgres and the lab |
-| Teacher and student workspaces | Working for the seeded course, upload, review, draft/publish, and download transcript |
-| Document engine | Tested TXT, Markdown, CSV, source, PDF, DOCX, ZIP listing, PNG preview. Other formats are stored or only partially handled. |
-| Annotations | Text-offset highlight, underline, and point comments. Not glyph-accurate PDF markup. |
-| Similarity | Running on a small public-domain corpus. Overlap is not a plagiarism finding. |
-| AI-writing assessment | Experimental heuristic restored. Consequential use disabled. Synthetic fixtures only. |
-| Tests | Backend extract/product tests and 5 Playwright tests passed in this session. |
+| Branches | Unified on `cursor/academic-review-lab-ba77` (ADR-010). SQLite branch frozen after porting its engines. |
+| Persistence | PostgreSQL 16 + Prisma with versioned migrations. |
+| Teacher and student workspaces | Working for the seeded course: upload, review, draft/publish, rubric, transcript download. |
+| Document engine | Tested TXT, Markdown, CSV, source, PDF, DOCX, ZIP listing, PNG preview. Other formats are stored or partially handled. |
+| Annotations | Text-offset highlight, underline, point comments. No reply threads in UI yet; not glyph-accurate PDF markup. |
+| Similarity | Independent k-gram engine with NEAR matching, exclusions, ranked attribution against reference texts and peer submissions; classmates' names and text redacted for students. Not a plagiarism finding, not Turnitin. |
+| AI-writing assessment | Experimental signal module, teacher-only, uncertainty band, safeguards, mandatory recorded teacher review. 0 of 6 release gates met. |
+| Tests (2026-11-18) | Backend 51 unit + 14 integration passed (run twice); typecheck clean; frontend build passed; Playwright 5 passed (run twice). |
 | Demo | Local preview at port 5173. No public HTTPS deployment. |
-
-The counter/notes bootstrap on `main` is not the product.

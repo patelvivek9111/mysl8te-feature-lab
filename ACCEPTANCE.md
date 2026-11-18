@@ -1,10 +1,14 @@
 # Final Acceptance Criteria
 
-**Current verdict (2026-10-18): NOT RELEASE READY.**
+**Current verdict (2026-11-18): NOT RELEASE READY.**
 
-Working and tested: instructor/student login, course and assignment pages, student upload, background text extraction for TXT/PDF/DOCX, draft grades and annotations hidden from the author and from other students, publish, similarity overlap against public-domain sources, experimental AI report with consequential use forced off, text transcript download, and Playwright coverage of the teacher-publish and student-upload paths.
+Working and tested: instructor/student login, course and assignment pages, student upload, background text extraction for TXT/PDF/DOCX, draft grades and annotations hidden from the author and from other students, publish, independent k-gram similarity (NEAR matches, quote/bibliography exclusions, ranked attribution) with classmates' names and text redacted for students, experimental AI-writing signals that are teacher-only with a mandatory recorded review, versioned Prisma migrations, text transcript download, and Playwright coverage of the teacher-publish, AI-review, and student-upload paths.
 
-Not accepted yet: hosted URL, versioned migrations, full format matrix, glyph-accurate PDF annotations, freehand/area/strikethrough tools, comment replies, annotated original export, real-world AI or similarity benchmarks, performance numbers, and an independent reviewer sign-off.
+Not accepted yet: hosted URL, full format matrix, glyph-accurate PDF annotations, freehand/area/strikethrough tools, comment replies, annotated original export, auth hardening (rate limiting, revocable sessions), real-world AI or similarity benchmarks, performance numbers, and a full independent security sign-off.
+
+## Independent reviews
+
+- **2026-11-18, integration review** (read-only subagent `bc-bf67e783-5240-5722-8b04-cbdf88f85716`, scope: branch unification commits). No high-severity findings; confirmed AI assessments are never sent to students. Fixed in the same run, with regression tests: classmates' names and excerpts leaked to students via similarity sources (pre-existing); teacher reviews were lost without history on model change (now kept in the audit log); boot-time rebuild blocked startup and overwrote teacher similarity options; migration script misparsed some URLs and hid connection failures (now URL-parsed, fails fast, checks drift); review accepted unfinished assessments and could race the worker (now requires COMPLETED and an optimistic version check). Open: recalculating similarity does not refresh the AI paraphrase context; excluded regions store text but not offsets; admin review policy undecided.
 
 The checklist below is the original bar. Unchecked items remain open.
 

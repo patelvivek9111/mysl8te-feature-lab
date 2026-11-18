@@ -5,6 +5,27 @@
 
 ---
 
+## ADR-010: One canonical branch on PostgreSQL; SQLite branch frozen
+
+**Date**: 2026-11-18  
+**Status**: ACCEPTED  
+**Supersedes**: ADR-008 on `cursor/mysl8te-full-application-b175` (SQLite via `node:sqlite`)
+
+Two divergent implementations existed. Both were checked out and tested on 2026-11-18:
+
+| | `cursor/academic-review-lab-ba77` (PR #4) | `cursor/mysl8te-full-application-b175` |
+| --- | --- | --- |
+| Database | PostgreSQL 16 + Prisma (`db push`, no history) | SQLite (`node:sqlite`, experimental) |
+| Backend tests | 10 passed | 77 passed |
+| Frontend | Working teacher/student UI | Never committed; still the bootstrap counter app |
+| Playwright | 5 passed against real persistence | None for the product |
+
+Decision: `cursor/academic-review-lab-ba77` is the only integration branch. It is the only one with a working end-to-end product on real persistence, and PostgreSQL now installs in the Cloud Agent VM, which removes ADR-008's sole reason for SQLite. The SQLite branch's strongest work is database-independent, so it was ported instead of discarded: the k-gram similarity engine and the AI-writing signal module with their 51 tests, evaluation harness, and release-gate docs. Prisma migrations (`backend/prisma/migrations`, applied with `backend/scripts/migrate.sh`) replace `db push`.
+
+Still to port from the SQLite branch (tracked in `TASK_QUEUE.md`): annotated PDF export, auth hardening (rate limiting, server-side sessions), annotation reply threads, per-course similarity index caching, and the security-review regression tests. No new commits go to `cursor/mysl8te-full-application-b175`.
+
+Note: two earlier entries below are both numbered ADR-007. The AI-restoration entry is the one referred to as ADR-009 on the SQLite branch.
+
 ## ADR-007: Restore experimental AI-writing assessment
 
 **Date**: 2026-10-18  
