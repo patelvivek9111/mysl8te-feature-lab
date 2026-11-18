@@ -522,17 +522,23 @@ export function createApp() {
         return;
       }
       const type = String(req.body.type || 'HIGHLIGHT') as AnnotationType;
+      const percent = (value: unknown) => (value === undefined || value === null ? null : Number(value));
+      const coords = { x: percent(req.body.x) ?? 0, y: percent(req.body.y) ?? 0, width: percent(req.body.width), height: percent(req.body.height) };
+      const page = req.body.page === undefined ? 1 : Number(req.body.page);
+      if (!Object.values(AnnotationType).includes(type)
+        || !Number.isInteger(page) || page < 1 || page > 100_000
+        || Object.values(coords).some((value) => value !== null && !(Number.isFinite(value) && value >= 0 && value <= 100))) {
+        res.status(400).json({ error: 'Annotation type, page, or position is not valid' });
+        return;
+      }
       const annotation = await prisma.annotation.create({
         data: {
           documentId: submission.documentId,
           submissionId: submission.id,
           createdById: req.user!.id,
           type,
-          page: Number(req.body.page || 1),
-          x: Number(req.body.x || 0),
-          y: Number(req.body.y || 0),
-          width: req.body.width === undefined ? null : Number(req.body.width),
-          height: req.body.height === undefined ? null : Number(req.body.height),
+          page,
+          ...coords,
           content: req.body.content ? String(req.body.content) : null,
           color: req.body.color ? String(req.body.color) : '#f2c14e',
           strokeData: req.body.strokeData ? String(req.body.strokeData) : null,

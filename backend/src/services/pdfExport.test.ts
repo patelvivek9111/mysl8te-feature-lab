@@ -2,19 +2,10 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { degrees, PDFDocument, StandardFonts } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
-import { layoutWords, MAX_EXPORT_TEXT, renderFeedbackPdf, textRange, winAnsi, type ExportAnnotation, type ExportInput } from './pdfExport';
+import { layoutWords, MAX_EMBEDDED_PAGES, MAX_EXPORT_TEXT, renderFeedbackPdf, textRange, winAnsi, type ExportAnnotation, type ExportInput } from './pdfExport';
 
-const hasPoppler = (() => {
-  try {
-    execFileSync('which', ['pdftotext']);
-    execFileSync('which', ['pdftoppm']);
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 const TEXT = 'It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.\n\nHowever little known the feelings or views of such a man may be on his first entering a neighbourhood.';
 
@@ -107,7 +98,9 @@ describe('pdf export helpers', () => {
   });
 
   it('maps characters the standard fonts cannot encode', () => {
-    expect(winAnsi('\u201cHi\u201d \u2014 caf\u00e9 \u4e2d \ud83d\ude00')).toBe('"Hi" - caf\u00e9 ? ?');
+    const input = '\u201cHi\u201d \u2014 caf\u00e9 \u4e2d \ud83d\ude00\u2026';
+    expect(winAnsi(input)).toBe('"Hi" - caf\u00e9 ? ??.');
+    expect(winAnsi(input)).toHaveLength(input.length);
   });
 
   it('keeps original character offsets while wrapping, including non-WinAnsi text', async () => {
@@ -126,7 +119,7 @@ describe('pdf export helpers', () => {
   });
 });
 
-describe.skipIf(!hasPoppler)('renderFeedbackPdf', () => {
+describe('renderFeedbackPdf (requires poppler-utils)', () => {
   it('writes a parseable PDF with grade, rubric, annotations, replies, and the document text', async () => {
     const bytes = await renderFeedbackPdf(input({
       annotations: [
@@ -216,4 +209,78 @@ describe.skipIf(!hasPoppler)('renderFeedbackPdf', () => {
     const bytes = await renderFeedbackPdf(input({ text: long, annotations: [annotation({ anchor: { kind: 'text', start: MAX_EXPORT_TEXT - 10, end: MAX_EXPORT_TEXT + 50 } })] }));
     expect(pdfText(bytes)).toContain('[Text truncated at 300,000 characters]');
   }, 60_000);
+
+  it('exports long unspaced runs of non-Latin text without throwing', async () => {
+    const cjk = '\u4e2d\u6587'.repeat(1500);
+    const emoji = '\ud83d\ude00'.repeat(400);
+    const text = `${cjk} x${emoji}y \u0416${'\u0416'.repeat(300)} end`;
+    const bytes = await renderFeedbackPdf(input({
+      text,
+      annotations: [annotation({ anchor: { kind: 'text', start: 2990, end: 3010 }, content: 'Across the run boundary.' })],
+    }));
+    const out = pdfText(bytes);
+    expect(out).toContain('end');
+    expect(out).toContain('Across the run boundary.');
+  });
+
+  it('stays fast for a 300,000-character word and many overlapping marks', async () => {
+    let started = Date.now();
+    await renderFeedbackPdf(input({ text: 'x'.repeat(MAX_EXPORT_TEXT), annotations: [annotation({ type: 'FREE_TEXT', content: 'y'.repeat(100_000), anchor: { kind: 'text', start: 0, end: MAX_EXPORT_TEXT } })] }));
+    expect(Date.now() - started).toBeLessThan(10_000);
+    const words = Array.from({ length: 5000 }, (_, i) => `word${i}`).join(' ');
+    started = Date.now();
+    await renderFeedbackPdf(input({
+      text: words,
+      annotations: Array.from({ length: 200 }, (_, i) => annotation({ anchor: { kind: 'text', start: i, end: words.length }, type: i % 2 ? 'HIGHLIGHT' : 'UNDERLINE' })),
+    }));
+    expect(Date.now() - started).toBeLessThan(10_000);
+  }, 60_000);
+
+  it('collapses long runs of blank lines', async () => {
+    const doc = await PDFDocument.load(await renderFeedbackPdf(input({ text: `a${'\n'.repeat(100_000)}b` })));
+    expect(doc.getPageCount()).toBeLessThan(4);
+  });
+
+  it('places page marks on rotated pages as displayed', async () => {
+    const original = await PDFDocument.create();
+    original.addPage([612, 792]).setRotation(degrees(90));
+    const bytes = await renderFeedbackPdf(input({
+      format: 'PDF',
+      originalPdf: await original.save(),
+      annotations: [annotation({ type: 'AREA', page: 1, x: 10, y: 10, width: 40, height: 20, color: '#ff0000' })],
+    }));
+    const dir = scratch();
+    const file = path.join(dir, 'out.pdf');
+    fs.writeFileSync(file, bytes);
+    const doc = await PDFDocument.load(bytes);
+    const read = renderPage(file, doc.getPageCount());
+    const red = (x: number, y: number) => {
+      const [r, g, b] = read(x, y);
+      return r > 200 && g < 80 && b < 80;
+    };
+    expect([-1, 0, 1].some((dx) => red(792 * 0.1 + dx, 612 * 0.2))).toBe(true);
+    expect([-1, 0, 1].some((dx) => red(612 * 0.1 + dx, 792 * 0.2))).toBe(false);
+  });
+
+  it('labels marks on missing pages and caps embedded pages', async () => {
+    const original = await PDFDocument.create();
+    for (let i = 0; i < MAX_EMBEDDED_PAGES + 5; i++) original.addPage([200, 200]);
+    const bytes = await renderFeedbackPdf(input({
+      format: 'PDF',
+      originalPdf: await original.save(),
+      annotations: [
+        annotation({ type: 'POINT', page: MAX_EMBEDDED_PAGES + 50, content: 'Missing page.' }),
+        annotation({ type: 'POINT', page: MAX_EMBEDDED_PAGES + 2, content: 'Past the cap.' }),
+        annotation({ type: 'POINT', page: 3, x: Number.NaN, y: Number.POSITIVE_INFINITY, content: 'Bad coordinates.' }),
+        annotation({ anchor: { kind: 'text', start: TEXT.length + 10, end: TEXT.length + 20 }, content: 'Too far.' }),
+      ],
+    }));
+    const out = pdfText(bytes);
+    expect(out).toContain(`page ${MAX_EMBEDDED_PAGES + 50} (not in the original PDF)`);
+    expect(out).toContain(`(beyond the ${MAX_EMBEDDED_PAGES} pages included in this export)`);
+    expect(out).toContain(`Only the first ${MAX_EMBEDDED_PAGES} of ${MAX_EMBEDDED_PAGES + 5} original pages are included.`);
+    expect(out).toContain('on text beyond the exported document text');
+    const doc = await PDFDocument.load(bytes);
+    expect(doc.getPages().filter((page) => page.getWidth() === 200)).toHaveLength(MAX_EMBEDDED_PAGES);
+  });
 });

@@ -337,17 +337,17 @@ test('teachers outside the course and admins cannot review, and superseded revie
 async function exportPdf(submissionId: string, token?: string) {
   const response = await fetch(`${base}/api/submissions/${submissionId}/export`, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
   const bytes = Buffer.from(await response.arrayBuffer());
-  const text = response.headers.get('content-type')?.startsWith('application/pdf')
-    ? (await promisify(execFile)('pdftotext', ['-layout', await writeTemp(bytes), '-'])).stdout
-    : '';
+  let text = '';
+  if (response.headers.get('content-type')?.startsWith('application/pdf')) {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-'));
+    try {
+      await fs.writeFile(path.join(dir, 'feedback.pdf'), bytes);
+      text = (await promisify(execFile)('pdftotext', ['-layout', path.join(dir, 'feedback.pdf'), '-'])).stdout;
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }
   return { status: response.status, headers: response.headers, bytes, text };
-}
-
-async function writeTemp(bytes: Buffer): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-'));
-  const file = path.join(dir, 'feedback.pdf');
-  await fs.writeFile(file, bytes);
-  return file;
 }
 
 test('feedback export is an annotated PDF that hides drafts from students', async () => {
@@ -359,6 +359,7 @@ test('feedback export is an annotated PDF that hides drafts from students', asyn
   const assignment = course.body.course.assignments.find((item: { title: string }) => item.title === 'Opening paragraph close reading');
   const submissionId = assignment.submissions[0].id as string;
   const secret = `Draft export note ${Date.now()}`;
+  const auditsBefore = await prisma.auditLog.count({ where: { entityId: submissionId, action: 'export_feedback' } });
   const draft = await json(`/api/submissions/${submissionId}/annotations`, teacher, {
     method: 'POST',
     body: JSON.stringify({ type: 'UNDERLINE', content: secret, anchor: { kind: 'text', start: 0, end: 20 } }),
@@ -382,8 +383,8 @@ test('feedback export is an annotated PDF that hides drafts from students', asyn
 
     assert.equal((await exportPdf(submissionId, alan)).status, 403);
     assert.equal((await exportPdf(submissionId)).status, 401);
-    const logged = await prisma.auditLog.count({ where: { entityId: submissionId, action: 'export_feedback' } });
-    assert.ok(logged >= 2);
+    const auditsAfter = await prisma.auditLog.count({ where: { entityId: submissionId, action: 'export_feedback' } });
+    assert.equal(auditsAfter - auditsBefore, 2);
   } finally {
     await json(`/api/annotations/${draft.body.annotation.id}`, teacher, { method: 'DELETE' });
   }
@@ -392,6 +393,10 @@ test('feedback export is an annotated PDF that hides drafts from students', asyn
 test('feedback export of a PDF submission embeds the original pages', async () => {
   assert.ok(pdfSubmissionId, 'the PDF upload test must run first');
   const teacher = await login(DEMO_ACCOUNTS.teacher.email, DEMO_ACCOUNTS.teacher.password);
+  for (const invalid of [{ type: 'AREA', x: 'abc' }, { type: 'AREA', x: 150 }, { type: 'AREA', page: 0 }, { type: 'AREA', page: 1.5 }, { type: 'LASER' }]) {
+    const refused = await json(`/api/submissions/${pdfSubmissionId}/annotations`, teacher, { method: 'POST', body: JSON.stringify(invalid) });
+    assert.equal(refused.status, 400, JSON.stringify(invalid));
+  }
   const area = await json(`/api/submissions/${pdfSubmissionId}/annotations`, teacher, {
     method: 'POST',
     body: JSON.stringify({ type: 'AREA', page: 1, x: 5, y: 10, width: 60, height: 40, content: 'Boxed region note' }),
