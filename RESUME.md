@@ -28,13 +28,13 @@ Fresh VM without install having run: `sudo apt-get install -y postgresql poppler
 ## Verify (must stay green)
 
 ```bash
-cd backend && npm run typecheck && npm test     # 51 vitest unit + 14 node:test integration (PostgreSQL)
-cd ../frontend && npm run build && npx playwright test   # 5 E2E with video, starts both servers
+cd backend && npm run typecheck && npm test     # 61 vitest unit + 25 node:test integration (PostgreSQL)
+cd ../frontend && npm run build && npx playwright test   # 8 E2E with video, starts both servers
 ```
 
 Schema changes: edit `backend/prisma/schema.prisma`, then `npx prisma migrate dev --name <change>` and commit the new migration folder. `scripts/migrate.sh` baselines databases created by the old `db push`.
 
-## Demo accounts (seeded when `SEED_ON_BOOT=true`)
+## Demo accounts (seeded when `SEED_ON_BOOT=true`; boot resets their passwords)
 
 - Instructor: `ada@demo.lab` / `DemoTeacher!2026`
 - Students: `grace@demo.lab`, `alan@demo.lab` / `DemoStudent!2026`
@@ -42,7 +42,7 @@ Schema changes: edit `backend/prisma/schema.prisma`, then `npx prisma migrate de
 
 ## Architecture map
 
-- `backend/src/app.ts` routes; `services/` (auth, access, extract, similarity service, AI assessment service); `worker.ts` background jobs; `seed.ts`.
+- `backend/src/app.ts` routes; `services/` (auth sessions + password policy, rateLimit, access, extract, similarity service, AI assessment service); `worker.ts` background jobs; `seed.ts`.
 - `backend/src/similarity/` k-gram engine (pure TS). `backend/src/ai-writing/` experimental signal module, evaluation harness, release gates (pure TS).
 - `backend/prisma/` schema and migrations. `frontend/src/App.tsx`, `AiReviewCard.tsx`; `frontend/tests/` Playwright.
 

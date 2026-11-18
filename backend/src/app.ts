@@ -82,7 +82,9 @@ export function createApp() {
   const app = express();
   app.disable('x-powered-by');
   const trustProxy = process.env.TRUST_PROXY;
-  app.set('trust proxy', trustProxy && /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy || 'loopback');
+  app.set('trust proxy', !trustProxy ? 'loopback'
+    : /^\d+$/.test(trustProxy) ? Number(trustProxy)
+      : trustProxy === 'true' ? true : trustProxy === 'false' ? false : trustProxy);
   app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -129,8 +131,14 @@ export function createApp() {
       // Count the attempt before the slow hash so concurrent guesses cannot all slip under the limit.
       loginLimiters.address.recordFailure(ip);
       loginLimiters.account.recordFailure(accountKey);
-      const user = await prisma.user.findUnique({ where: { email } });
-      const ok = await verifyPassword(password, user?.passwordHash);
+      const { user, ok } = await (async () => {
+        const found = await prisma.user.findUnique({ where: { email } });
+        return { user: found, ok: await verifyPassword(password, found?.passwordHash) };
+      })().catch((error) => {
+        loginLimiters.address.release(ip);
+        loginLimiters.account.release(accountKey);
+        throw error;
+      });
       if (!user || !ok) {
         await audit(user?.id, 'login_failed', 'user', user?.id ?? 'unknown');
         res.status(401).json({ error: INVALID_LOGIN });
