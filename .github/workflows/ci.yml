@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main, cursor/academic-review-lab-ba77]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://lab:lab@localhost:5432/mysl8te_feature_lab?schema=public
+  NODE_ENV: development
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lab
+          POSTGRES_PASSWORD: lab
+          POSTGRES_DB: mysl8te_feature_lab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lab"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install document tools and psql
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils postgresql-client unzip p7zip-full
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client and migrate
+        working-directory: backend
+        run: |
+          npx prisma generate
+          bash scripts/migrate.sh
+
+      - name: Backend typecheck
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: Backend unit tests
+        working-directory: backend
+        run: npm run test:unit
+
+      - name: Backend integration tests
+        working-directory: backend
+        run: npm run test:integration
+
+      - name: Frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Frontend build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright end-to-end tests
+        working-directory: frontend
+        env:
+          CI: "true"
+        run: npx playwright test
+
+      - name: Upload Playwright report and videos
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
