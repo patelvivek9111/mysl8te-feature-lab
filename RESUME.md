@@ -28,8 +28,8 @@ Fresh VM without install having run: `sudo apt-get install -y postgresql poppler
 ## Verify (must stay green)
 
 ```bash
-cd backend && npm run typecheck && npm test     # 74 vitest unit + 28 node:test integration (PostgreSQL; needs poppler-utils)
-cd ../frontend && npm run build && npx playwright test   # 10 E2E with video, starts both servers
+cd backend && npm run typecheck && npm test     # 80 vitest unit + 33 node:test integration (PostgreSQL; needs poppler-utils)
+cd ../frontend && npm run build && npx playwright test   # 12 E2E with video, starts both servers
 ```
 
 Schema changes: edit `backend/prisma/schema.prisma`, then `npx prisma migrate dev --name <change>` and commit the new migration folder. `scripts/migrate.sh` baselines databases created by the old `db push`.
@@ -42,9 +42,9 @@ Schema changes: edit `backend/prisma/schema.prisma`, then `npx prisma migrate de
 
 ## Architecture map
 
-- `backend/src/app.ts` routes; `services/` (auth sessions + password policy, rateLimit, access, extract, similarity service with excluded-offset backfill, AI assessment service with row-locked rebuilds, pdfExport); `worker.ts` background jobs; `seed.ts`; `index.ts` boot tasks (stale-model refresh, offset backfill).
+- `backend/src/app.ts` routes (comment threads lock the annotation row via `lockAnnotation`); `services/` (auth sessions + password policy, rateLimit, access, extract, similarity service with excluded-offset backfill, AI assessment service with row-locked rebuilds, pdfExport, pageImage page renders, annotationInput validation); `worker.ts` background jobs; `seed.ts`; `index.ts` boot tasks (stale-model refresh, offset backfill).
 - `backend/src/similarity/` k-gram engine (pure TS). `backend/src/ai-writing/` experimental signal module, evaluation harness, release gates (pure TS).
-- `backend/prisma/` schema and migrations. `frontend/src/App.tsx`, `AiReviewCard.tsx`; `frontend/tests/` Playwright.
+- `backend/prisma/` schema and migrations. `frontend/src/App.tsx`, `AiReviewCard.tsx`, `CommentThreads.tsx`, `PageMarkup.tsx`; `frontend/tests/` Playwright.
 
 ## Non-negotiables
 

@@ -1,6 +1,6 @@
 # Task Queue
 
-**Last updated**: 2026-11-18  
+**Last updated**: 2026-11-18 (ANNOT-2)  
 **Branch**: `cursor/academic-review-lab-ba77` (canonical, ADR-010)
 
 DONE means code plus passing automated tests on this branch.
@@ -21,13 +21,14 @@ DONE means code plus passing automated tests on this branch.
 | node_modules untracked | commit 0bb6975 |
 | PORT-PDF: annotated feedback PDF replaces the text transcript (text marks over character ranges, original PDF pages with rotation-aware page marks, 200-page cap, drafts hidden from students, audited); annotation input validation; independent review findings fixed | `src/services/pdfExport.test.ts` (13), product tests 26-27, `tests/workflows.spec.ts` download check |
 | REVIEW-INT-2: excluded-region offsets (migration + boot backfill), document overlay of exact/near matches and exclusions, teacher matching-options form with strict validation and audit, AI paraphrase refresh on recalculation with review history, row-locked AI rebuilds and advisory-locked report rebuilds, admin policy (ADR-011); independent review findings fixed | product tests 22-23 and 26, `tests/similarity.spec.ts` (2) |
+| ANNOT-2: reply threads (teacher + submitting student, nested, drafts until publish, row-locked create/delete, audited), notification mark-read and mark-all-read UI, strikethrough tool, area and freehand markup on rendered PDF/image pages (`/api/documents/:id/pages/:n`, render semaphore, 2000 px cap), validated stroke data and annotation input, threaded replies in the PDF export; independent review findings fixed | `src/annotations.test.ts` (5), `src/services/annotationInput.test.ts` (6), `tests/annotations.spec.ts` (2) |
 | PORT-SEC: revocable hashed sessions, logout/logout-all, password change + policy, login and password-change rate limiting, enumeration-safe login, security headers, JSON/upload size errors, Account UI; independent review findings fixed | `src/auth.test.ts` (11), `src/services/authPolicy.test.ts` (10), `tests/auth.spec.ts` (3) |
 
 ## Ready (priority order)
 
-1. **ANNOT-2** Comment reply threads in the API and UI (the `Comment.parentId` column exists), notification mark-read in the UI, strikethrough/area/freehand tools.
-2. **CI-1** GitHub Actions: Postgres service, `poppler-utils` (renderer tests require `pdftotext`/`pdftoppm`), backend typecheck + tests, frontend build + lint + Playwright, upload videos.
-3. **PERF-1** Per-course cached similarity index (port `similarityIndex` caching approach), move PDF export rendering off the request thread (worker or cache), cap FREE_DRAW stroke data, make the similarity overlay sweep O(n log n) (currently boundaries x spans), and benchmarks: 25 MB PDF extract, 2k-document corpus via API, 500 annotations.
+1. **CI-1** GitHub Actions: Postgres service, `poppler-utils` (renderer tests require `pdftotext`/`pdftoppm`), backend typecheck + tests, frontend build + lint + Playwright, upload videos.
+2. **PERF-1** Per-course cached similarity index (port `similarityIndex` caching approach), move PDF export rendering off the request thread (worker or cache), make the similarity overlay sweep O(n log n) (currently boundaries x spans), and benchmarks: 25 MB PDF extract, 2k-document corpus via API, 500 annotations.
+3. **ANNOT-3** FREE_TEXT boxes on pages; keyboard-operable area/drawing creation (e.g. numeric box entry) and accessible list of page marks; page markup zoom; lazy-load the original PDF preview; page-cache eviction when documents are removed; per-user render queue limits; move notification writes into the comment transaction and map lock-wait timeouts (P2028) to 409; COMMENT_ADDED notifications for draft replies published with the grade; concurrency tests for reply/delete.
 4. **FMT-1** Format matrix expansion only with passing tests: ODT, XLSX/PPTX text, OCR (tesseract), Office-to-PDF (LibreOffice).
 5. **E5** Turnitin-style match groups (not cited/quoted, missing quotations, missing citation) on top of quote/citation detection.
 6. **G2** Institution isolation tests and admin UI.

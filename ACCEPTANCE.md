@@ -2,12 +2,13 @@
 
 **Current verdict (2026-11-18): NOT RELEASE READY.**
 
-Working and tested: instructor/student login, course and assignment pages, student upload, background text extraction for TXT/PDF/DOCX, draft grades and annotations hidden from the author and from other students, publish, independent k-gram similarity (NEAR matches, quote/bibliography exclusions, ranked attribution) with classmates' names and text redacted for students, experimental AI-writing signals that are teacher-only with a mandatory recorded review, versioned Prisma migrations, revocable server-side sessions (logout, sign out everywhere, idle and absolute expiry), login and password-change rate limiting, password policy, annotated feedback PDF export (grade, rubric, numbered annotations with replies, text marks drawn over their character ranges, original PDF pages with page-positioned marks; drafts hidden from students), and Playwright coverage of the teacher-publish, AI-review, student-upload, PDF-download, and account/session paths.
+Working and tested: instructor/student login, course and assignment pages, student upload, background text extraction for TXT/PDF/DOCX, draft grades and annotations hidden from the author and from other students, publish, independent k-gram similarity (NEAR matches, quote/bibliography exclusions, ranked attribution) with classmates' names and text redacted for students, experimental AI-writing signals that are teacher-only with a mandatory recorded review, versioned Prisma migrations, revocable server-side sessions (logout, sign out everywhere, idle and absolute expiry), login and password-change rate limiting, password policy, annotated feedback PDF export (grade, rubric, numbered annotations with replies, text marks drawn over their character ranges, original PDF pages with page-positioned marks; drafts hidden from students), threaded teacher/student replies on annotations with notifications and mark-read controls, text strikethrough, area boxes and freehand drawing on rendered PDF/image pages, and Playwright coverage of the teacher-publish, AI-review, student-upload, PDF-download, reply-thread, page-drawing, and account/session paths.
 
-Not accepted yet: hosted URL, full format matrix, glyph-accurate PDF annotations, freehand/area/strikethrough tools, comment replies, glyph-accurate marks on original PDF pages for text-anchored annotations (they are drawn on the extracted text instead), distributed (multi-IP) per-account brute-force protection and MFA, real-world AI or similarity benchmarks, performance numbers, and a full independent security sign-off.
+Not accepted yet: hosted URL, full format matrix, glyph-accurate PDF annotations, FREE_TEXT boxes in the UI, keyboard-operable drawing tools, zoom, glyph-accurate marks on original PDF pages for text-anchored annotations (they are drawn on the extracted text instead), distributed (multi-IP) per-account brute-force protection and MFA, real-world AI or similarity benchmarks, performance numbers, and a full independent security sign-off.
 
 ## Independent reviews
 
+- **2026-11-18, annotation threads and page markup review** (read-only subagent `bc-dbf472d5-2806-5b90-b293-e982eaf26b48`, scope: ANNOT-2 commits). No high findings and no draft or peer leakage (comments, notifications, page images, export). Fixed in the same run: unbounded concurrent `pdftoppm` renders and oversized page bitmaps (now a render semaphore and a 2000 px cap from the `pdfinfo` page size); annotation deletes removed student replies without an audit record (now audited in the same transaction); reply/delete races could orphan replies, bypass the author 409, or exceed the 200-reply cap (now row-locked on the annotation); drawing view hid the original PDF (now a collapsible original preview); author deletes skipped enrollment; publish overwrote earlier `publishedAt`; pointer and point-cap bugs. Re-review confirmed no high or medium issues. Open (low, ANNOT-3): notification writes outside the transaction, lock-wait timeouts surface as 500, per-user render queue fairness, lazy-load of the original PDF, page-cache eviction, keyboard drawing.
 - **2026-11-18, similarity overlay and paraphrase refresh review** (read-only subagent `bc-b50276f1-a160-5ac4-b0a5-e61fdd88f874`, scope: REVIEW-INT-2 commits). No high findings and no leakage to students. Fixed in the same run, with regression tests: the boot backfill re-matched old reports and could clear teacher reviews (now rewrites only excluded rows from text and stored options); a teacher review racing an AI rebuild could be overwritten with a 200 (now row-locked; the blocked review gets 409); overlay allocated one object per character (now an interval sweep); concurrent report rebuilds could hit a unique-key error (advisory lock); marks were mouse-only (screen-reader prefixes); stale layer and annotation capture in the similarity layer; null threshold accepted. Re-review confirmed the fixes. Open (low, REVIEW-INT-3): one lock across report rebuild and AI refresh, first-insert race, keyboard navigation between marks, quadratic sweep on very large span counts.
 - **2026-11-18, annotated PDF export review** (read-only subagent `bc-198da071-416f-5d3d-8e49-ba1f0b233426`, scope: PORT-PDF commits). No authorization or leakage findings (drafts, AI signals, and peer data never reach a student export). Fixed in the same run, with regression tests: long unspaced non-Latin runs (CJK, emoji) threw and returned 500 (high); quadratic layout on long words (43 s for one 300k-character word, now 0.2 s); quadratic mark drawing with per-call opacity state (45 s for 50 overlapping marks, now 0.2 s); no page cap on embedded originals (now 200); misleading fallback note; out-of-range page marks silently moved; rotated/cropped pages misplaced marks; unvalidated annotation coordinates (now 400). Re-review confirmed the fixes. Open (low): FREE_DRAW stroke data uncapped (teacher-only); export rendering runs on the request thread (move to a worker or cache in PERF-1).
 - **2026-11-18, auth hardening review** (read-only subagent `bc-d607dca5-8092-5343-9e91-a7a25944f53d`, scope: PORT-SEC commits). No high findings. Fixed in the same run, with regression tests: concurrent guesses bypassed the login limit (attempts now counted before hashing); per-IP limit shared by all users behind a proxy (`trust proxy`, Vite `xfwd`, IPv6 /64 keys); no limit on current-password guesses at `/api/auth/password`; synchronous scrypt on the request path; a login racing a password change could keep a session; unindexed purge on every login; E2E restore could lock the demo student. Re-review confirmed the fixes. Open: per-account limit across many IPs (deferred, naive version enables lockout DoS).
@@ -53,18 +54,18 @@ The mission is complete when ALL of these criteria are met:
 
 ### 4. Annotation Tools Functional
 - [ ] All 6 annotation types work (Point, Area, Highlight, Strikeout, Free Draw, Free Text)
-- [ ] Annotations persist after page refresh
+- [x] Annotations persist after page refresh (`tests/annotations.spec.ts` reloads and re-checks area and drawing marks)
 - [ ] Annotations display correctly at different zoom levels
 - [ ] Annotations survive browser close/reopen
 
 **Verification**: Computer-use agent tests each tool, coordinates remain accurate
 
 ### 5. Comment System Working
-- [ ] Comments can be added to annotations
-- [ ] Comment threading works
-- [ ] Replies functional
-- [ ] Multi-line comments supported
-- [ ] Author attribution correct
+- [x] Comments can be added to annotations (`src/annotations.test.ts`, `tests/annotations.spec.ts`)
+- [x] Comment threading works (nested replies in UI and indented in the feedback PDF)
+- [x] Replies functional (teacher and student, with notifications)
+- [x] Multi-line comments supported (textarea, `white-space: pre-wrap`)
+- [x] Author attribution correct (author name and student label on each reply)
 
 **Verification**: Automated tests + visual verification
 
