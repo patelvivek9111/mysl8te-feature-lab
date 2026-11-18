@@ -66,7 +66,7 @@ export function AiReviewCard({ submissionId, assessment, onSaved }: { submission
           <p data-testid="ai-outcome"><strong>{OUTCOME_LABELS[assessment.outcome] ?? assessment.outcome}</strong></p>
           <p data-testid="ai-uncertainty">{assessment.uncertainty}</p>
           {assessment.evaluation && <p data-testid="ai-release-stage">Release stage: {assessment.evaluation.stage}{assessment.evaluation.validated ? '' : ' (release gates not met)'}</p>}
-          <ul className="plain">{assessment.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+          <ul className="plain">{assessment.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
           {assessment.features?.paraphraseSignal && <p className="note">Paraphrase: {assessment.features.paraphraseSignal.basis}</p>}
           <details>
             <summary>Safeguards</summary>
@@ -84,7 +84,7 @@ export function AiReviewCard({ submissionId, assessment, onSaved }: { submission
             </select>
           </label>
           <label>Review note (required)
-            <textarea data-testid="ai-review-note" value={note} onChange={(event) => setNote(event.target.value)} />
+            <textarea data-testid="ai-review-note" maxLength={4000} value={note} onChange={(event) => setNote(event.target.value)} />
           </label>
           <button data-testid="ai-review-save" disabled={saving || !decision || note.trim().length < 10} onClick={save}>Record review</button>
           {error && <p className="error">{error}</p>}

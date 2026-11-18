@@ -61,25 +61,57 @@ export function assessmentRecord(text: string, similarity: SimilarityResult | nu
   };
 }
 
-// Reports produced by an older model version are rebuilt (and need a fresh teacher review).
+// Analyses from an older model version are rebuilt with each report's stored similarity options.
+// The previous teacher review is kept in the audit log by storeAiAssessment.
 export async function refreshStaleAnalyses(): Promise<number> {
-  const rows = await prisma.aiAssessment.findMany({ select: { submissionId: true, features: true } });
-  const stale = rows.filter((row) => (row.features as { modelVersion?: string } | null)?.modelVersion !== MODEL_VERSION);
-  for (const row of stale) {
-    const submission = await prisma.submission.findUnique({ where: { id: row.submissionId }, include: { document: true } });
-    if (!submission) continue;
-    const similarity = await buildSimilarityReport(row.submissionId);
-    await storeAiAssessment(row.submissionId, submission.document.textContent ?? '', similarity);
+  const stale = await prisma.$queryRaw<Array<{ submission_id: string }>>`
+    SELECT submission_id FROM ai_assessments WHERE features->>'modelVersion' IS DISTINCT FROM ${MODEL_VERSION}`;
+  let refreshed = 0;
+  for (const { submission_id: submissionId } of stale) {
+    try {
+      const submission = await prisma.submission.findUnique({ where: { id: submissionId }, include: { document: true, similarityReport: true } });
+      if (!submission) continue;
+      const stored = submission.similarityReport;
+      const similarity = await buildSimilarityReport(submissionId, stored ? {
+        excludeQuotes: stored.excludeQuotes,
+        excludeBibliography: stored.excludeBibliography,
+        excludeSmallMatches: stored.excludeSmallMatches,
+        smallMatchThreshold: stored.smallMatchThreshold,
+      } : undefined);
+      await storeAiAssessment(submissionId, submission.document.textContent ?? '', similarity);
+      refreshed += 1;
+    } catch (error) {
+      console.error(JSON.stringify({ level: 'error', message: 'stale analysis refresh failed', submissionId, error: String(error) }));
+    }
   }
-  return stale.length;
+  return refreshed;
 }
 
 export async function storeAiAssessment(submissionId: string, text: string, similarity: SimilarityResult | null): Promise<void> {
   const record = assessmentRecord(text, similarity);
   const reviewReset = { reviewDecision: null, reviewNote: null, reviewedById: null, reviewedAt: null };
-  await prisma.aiAssessment.upsert({
-    where: { submissionId },
-    update: { ...record, ...reviewReset },
-    create: { submissionId, ...record },
+  await prisma.$transaction(async (tx) => {
+    const previous = await tx.aiAssessment.findUnique({ where: { submissionId } });
+    if (previous?.reviewDecision) {
+      await tx.auditLog.create({
+        data: {
+          userId: previous.reviewedById,
+          action: 'ai_review_superseded',
+          entity: 'submission',
+          entityId: submissionId,
+          changes: {
+            decision: previous.reviewDecision,
+            note: previous.reviewNote,
+            reviewedAt: previous.reviewedAt?.toISOString() ?? null,
+            modelVersion: (previous.features as { modelVersion?: string } | null)?.modelVersion ?? null,
+          },
+        },
+      });
+    }
+    await tx.aiAssessment.upsert({
+      where: { submissionId },
+      update: { ...record, ...reviewReset },
+      create: { submissionId, ...record },
+    });
   });
 }

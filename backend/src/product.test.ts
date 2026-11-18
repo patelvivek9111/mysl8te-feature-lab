@@ -9,6 +9,7 @@ import { createApp } from './app';
 import { seedDemo, DEMO_ACCOUNTS } from './seed';
 import { processNextJob } from './worker';
 import { refreshStaleAnalyses } from './services/aiAssessment';
+import { hashPassword } from './services/auth';
 import prisma from './db/prisma';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
@@ -262,4 +263,71 @@ test('AI-writing review requires the course teacher, a known decision, and a not
 
   const studentView = await json(`/api/submissions/${submissionId}`, grace);
   assert.equal(studentView.body.submission.aiAssessment, null);
+});
+
+test('students see peer matches without the classmate name or text', async () => {
+  const grace = await login(DEMO_ACCOUNTS.grace.email, DEMO_ACCOUNTS.grace.password);
+  const teacher = await login(DEMO_ACCOUNTS.teacher.email, DEMO_ACCOUNTS.teacher.password);
+  const courses = await json('/api/courses', grace);
+  const course = await json(`/api/courses/${courses.body.courses[0].id}`, grace);
+  const assignment = course.body.course.assignments.find((item: { title: string }) => item.title === 'Optional source notes');
+  const form = new FormData();
+  form.set('file', new Blob(['My summary borrows a line: Original lab notes that do not quote Austen or Lincoln at all. The observation is only about my own margin marks and a late library visit.'], { type: 'text/plain' }), 'grace-notes.txt');
+  const upload = await fetch(`${base}/api/assignments/${assignment.id}/submissions`, { method: 'POST', headers: { Authorization: `Bearer ${grace}` }, body: form });
+  assert.equal(upload.status, 201);
+  const { submissionId } = await upload.json() as { submissionId: string };
+  for (let i = 0; i < 5; i += 1) {
+    if (!(await processNextJob())) break;
+  }
+
+  const teacherView = await json(`/api/submissions/${submissionId}`, teacher);
+  const teacherPeer = teacherView.body.submission.similarityReport.sources.find((source: { sourceType: string }) => source.sourceType === 'STUDENT_PAPER');
+  assert.ok(teacherPeer, 'an earlier upload in the assignment is matched');
+  assert.match(teacherPeer.sourceName, /^Another submission by (Alan Turing|Grace Hopper)$/);
+  assert.ok(teacherPeer.passages[0].sourceText.length > 0);
+
+  const studentView = await json(`/api/submissions/${submissionId}`, grace);
+  const sources = studentView.body.submission.similarityReport.sources as Array<{ sourceType: string; sourceName: string; passages: Array<{ sourceText: string }> }>;
+  const studentPeers = sources.filter((source) => source.sourceType === 'STUDENT_PAPER');
+  assert.ok(studentPeers.length > 0);
+  for (const peer of studentPeers) {
+    assert.equal(peer.sourceName, 'Another submission in this assignment');
+    assert.equal(peer.passages.every((passage) => passage.sourceText === ''), true);
+  }
+  assert.equal(JSON.stringify(studentView.body.submission.similarityReport).includes('Another submission by'), false);
+  assert.equal(JSON.stringify(studentView.body).includes('Alan Turing'), false);
+});
+
+test('teachers outside the course and admins cannot review, and superseded reviews stay in the audit log', async () => {
+  const institution = await prisma.institution.findUniqueOrThrow({ where: { domain: 'demo.lab' } });
+  const password = 'OtherTeacher!2026';
+  for (const [email, role] of [['outsider@demo.lab', 'TEACHER'], ['admin@demo.lab', 'ADMIN']] as const) {
+    await prisma.user.upsert({
+      where: { email },
+      update: { role, passwordHash: hashPassword(password) },
+      create: { email, name: email, role, passwordHash: hashPassword(password), institutionId: institution.id },
+    });
+  }
+  const teacher = await login(DEMO_ACCOUNTS.teacher.email, DEMO_ACCOUNTS.teacher.password);
+  const outsider = await login('outsider@demo.lab', password);
+  const admin = await login('admin@demo.lab', password);
+  const courses = await json('/api/courses', teacher);
+  const course = await json(`/api/courses/${courses.body.courses[0].id}`, teacher);
+  const assignment = course.body.course.assignments.find((item: { title: string }) => item.title === 'Opening paragraph close reading');
+  const submissionId = assignment.submissions[0].id as string;
+  const path = `/api/submissions/${submissionId}/ai-assessment/review`;
+  const body = JSON.stringify({ decision: 'NO_CONCERN', note: 'Not my course, should be refused.' });
+  assert.equal((await json(path, outsider, { method: 'POST', body })).status, 403);
+  assert.equal((await json(path, admin, { method: 'POST', body })).status, 403);
+  assert.equal((await json(`/api/submissions/${submissionId}`, outsider)).status, 403);
+
+  const note = `Reviewed before a model change ${Date.now()}`;
+  assert.equal((await json(path, teacher, { method: 'POST', body: JSON.stringify({ decision: 'DISCUSS_WITH_STUDENT', note }) })).status, 200);
+  await prisma.aiAssessment.update({ where: { submissionId }, data: { features: { modelVersion: 'older-model' } } });
+  assert.equal(await refreshStaleAnalyses(), 1);
+  const after = await json(`/api/submissions/${submissionId}`, teacher);
+  assert.equal(after.body.submission.aiAssessment.reviewDecision, null);
+  assert.match(after.body.submission.aiAssessment.features.modelVersion, /experimental/);
+  const history = await prisma.auditLog.findMany({ where: { entityId: submissionId, action: 'ai_review_superseded' } });
+  assert.equal(history.some((row) => (row.changes as { note?: string } | null)?.note === note), true);
 });

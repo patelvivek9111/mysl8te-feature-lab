@@ -532,7 +532,7 @@ export function createApp() {
         res.status(403).json({ error: 'Only the teacher can review a writing-signal assessment' });
         return;
       }
-      if (!submission.aiAssessment) {
+      if (submission.aiAssessment?.status !== 'COMPLETED') {
         res.status(409).json({ error: 'The assessment is not ready yet' });
         return;
       }
@@ -546,12 +546,19 @@ export function createApp() {
         res.status(400).json({ error: 'A review note of 10 to 4000 characters is required' });
         return;
       }
-      const reviewed = await prisma.aiAssessment.update({
-        where: { submissionId: submission.id },
+      const written = await prisma.aiAssessment.updateMany({
+        where: { submissionId: submission.id, updatedAt: submission.aiAssessment.updatedAt },
         data: { reviewDecision: decision, reviewNote: note, reviewedById: req.user!.id, reviewedAt: new Date() },
+      });
+      if (written.count === 0) {
+        res.status(409).json({ error: 'The assessment changed while you were reviewing it. Reload and review again.' });
+        return;
+      }
+      const reviewed = await prisma.aiAssessment.findUnique({
+        where: { submissionId: submission.id },
         include: { reviewedBy: { select: { id: true, name: true } } },
       });
-      await audit(req.user!.id, 'ai_review', 'submission', submission.id);
+      await audit(req.user!.id, 'ai_review', 'submission', submission.id, { decision, note });
       res.json({ aiAssessment: reviewed });
     } catch (error) {
       next(error);

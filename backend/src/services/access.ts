@@ -38,18 +38,32 @@ export function canReadSubmission(user: AuthUser, submission: NonNullable<Awaite
   return user.role === UserRole.STUDENT && submission.studentId === user.id && studentIds.includes(user.id);
 }
 
+type SimilaritySourceView = { sourceType: string; sourceName: string; passages: Array<{ sourceText: string }> };
+
 type StudentVisible = {
   grade: { isDraft: boolean } | null;
   annotations: Array<{ isDraft: boolean; comments: Array<{ isDraft: boolean }> }>;
   aiAssessment?: unknown;
+  similarityReport?: { sources: SimilaritySourceView[] } | null;
 };
 
-// AI-writing signals are teacher-only (ADR-009): students never receive them, even after grades are published.
+const PEER_SOURCE_NAME = 'Another submission in this assignment';
+
+// Students never receive AI-writing signals (ADR-009), nor a classmate's name or text through similarity matches.
 export function studentView<T extends StudentVisible>(user: AuthUser, submission: T): T {
   if (user.role !== UserRole.STUDENT) return submission;
+  const report = submission.similarityReport;
   return {
     ...submission,
     aiAssessment: null,
+    similarityReport: report
+      ? {
+        ...report,
+        sources: report.sources.map((source) => source.sourceType === 'STUDENT_PAPER'
+          ? { ...source, sourceName: PEER_SOURCE_NAME, sourceUrl: null, passages: source.passages.map((passage) => ({ ...passage, sourceText: '' })) }
+          : source),
+      }
+      : report,
     grade: submission.grade && !submission.grade.isDraft ? submission.grade : null,
     annotations: submission.annotations
       .filter((annotation) => !annotation.isDraft)
