@@ -73,16 +73,12 @@ function tint(color: RGB, amount = 0.35): RGB {
   return rgb(1 - (1 - color.red) * amount, 1 - (1 - color.green) * amount, 1 - (1 - color.blue) * amount);
 }
 
-const WIN_ANSI_SUBSTITUTES: Record<string, string> = {
-  '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"', '\u2013': '-', '\u2014': '-', '\u2026': '.', '\t': ' ', '\r': ' ',
-};
-
 /**
- * Standard 14 fonts only encode WinAnsi. Every UTF-16 unit maps to exactly one drawable character,
- * so character offsets into the original text stay valid for the drawn copy.
+ * Standard 14 fonts only encode WinAnsi (Latin-1 plus the CP1252 extras). Every UTF-16 unit maps to
+ * exactly one drawable character, so character offsets into the original text stay valid for the drawn copy.
  */
 export function winAnsi(s: string): string {
-  return s.replace(/[^\x20-\x7e\xa0-\xff\n]/g, (c) => WIN_ANSI_SUBSTITUTES[c] ?? '?');
+  return s.replace(/[^\x20-\x7e\xa0-\xff\n€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ]/g, (c) => (/\s/.test(c) ? ' ' : '?'));
 }
 
 const widthCache = new WeakMap<PDFFont, Map<string, number>>();
@@ -324,7 +320,7 @@ function drawOnPage(page: PDFPage, raw: ExportAnnotation, index: number, font: P
 }
 
 function excerpt(text: string, start: number, end: number): string {
-  const slice = text.slice(start, end).replace(/\s+/g, ' ').trim();
+  const slice = text.slice(start, Math.min(end, start + 400)).replace(/\s+/g, ' ').trim();
   return slice.length > 160 ? `${slice.slice(0, 157)}...` : slice;
 }
 

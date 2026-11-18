@@ -98,8 +98,8 @@ describe('pdf export helpers', () => {
   });
 
   it('maps characters the standard fonts cannot encode', () => {
-    const input = '\u201cHi\u201d \u2014 caf\u00e9 \u4e2d \ud83d\ude00\u2026';
-    expect(winAnsi(input)).toBe('"Hi" - caf\u00e9 ? ??.');
+    const input = '\u201cHi\u201d \u2014 caf\u00e9 \u4e2d \ud83d\ude00\u2026\f\u20ac\u2022\u2122\u3000\t';
+    expect(winAnsi(input)).toBe('\u201cHi\u201d \u2014 caf\u00e9 ? ??\u2026 \u20ac\u2022\u2122  ');
     expect(winAnsi(input)).toHaveLength(input.length);
   });
 
@@ -109,7 +109,7 @@ describe('pdf export helpers', () => {
     const text = 'alpha \u201cbeta\u201d \ud83d\ude00 gamma\n\ndelta ' + 'x'.repeat(400);
     const { words, lineCount } = layoutWords(text, font, 10, 200);
     for (const word of words) expect(text.slice(word.start, word.end).replace(/\s/g, '')).toBe(text.slice(word.start, word.end));
-    expect(words.find((w) => w.text === '"beta"')).toMatchObject({ start: 6, end: 12 });
+    expect(words.find((w) => w.text === '\u201cbeta\u201d')).toMatchObject({ start: 6, end: 12 });
     expect(words.find((w) => w.text === 'delta')!.line).toBe(2);
     const long = words.filter((w) => w.text.startsWith('x'));
     expect(long.length).toBeGreaterThan(1);
