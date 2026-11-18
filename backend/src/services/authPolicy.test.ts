@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { hashPassword, hashToken, passwordPolicyErrors, verifyPassword } from './auth';
-import { FailureLimiter } from './rateLimit';
+import { hashPassword, hashPasswordAsync, hashToken, passwordPolicyErrors, verifyPassword } from './auth';
+import { FailureLimiter, clientAddressKey } from './rateLimit';
 
 describe('password hashing', () => {
   it('verifies the right password and rejects others', async () => {
     const stored = hashPassword('Correct-Horse-Battery-2026');
     expect(await verifyPassword('Correct-Horse-Battery-2026', stored)).toBe(true);
     expect(await verifyPassword('Correct-Horse-Battery-2025', stored)).toBe(false);
+    expect(await verifyPassword('Correct-Horse-Battery-2026', await hashPasswordAsync('Correct-Horse-Battery-2026'))).toBe(true);
   });
 
   it('rejects missing or malformed stored hashes without throwing', async () => {
@@ -37,7 +38,29 @@ describe('password policy', () => {
   });
 });
 
+describe('clientAddressKey', () => {
+  it('keeps IPv4 addresses and unwraps IPv4-mapped IPv6', () => {
+    expect(clientAddressKey('203.0.113.9')).toBe('203.0.113.9');
+    expect(clientAddressKey('::ffff:203.0.113.9')).toBe('203.0.113.9');
+    expect(clientAddressKey(undefined)).toBe('unknown');
+  });
+
+  it('groups IPv6 addresses by /64', () => {
+    expect(clientAddressKey('2001:db8:1:2::1')).toBe('2001:db8:1:2::/64');
+    expect(clientAddressKey('2001:0db8:0001:0002:ffff:eeee:dddd:cccc')).toBe('2001:db8:1:2::/64');
+    expect(clientAddressKey('2001:db8::1')).toBe('2001:db8:0:0::/64');
+    expect(clientAddressKey('::1')).toBe('0:0:0:0::/64');
+  });
+});
+
 describe('FailureLimiter', () => {
+  it('release undoes a provisional failure', () => {
+    const limiter = new FailureLimiter(1, 60_000);
+    limiter.recordFailure('k', 0);
+    limiter.release('k');
+    expect(limiter.retryAfterSeconds('k', 1)).toBe(0);
+  });
+
   it('blocks only after the failure budget is spent and expires with the window', () => {
     const limiter = new FailureLimiter(3, 1000);
     const now = 1_000_000;

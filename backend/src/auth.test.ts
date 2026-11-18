@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp, loginLimiters } from './app';
+import { createApp, loginLimiters, passwordChangeLimiter } from './app';
 import { hashPassword, hashToken } from './services/auth';
 import prisma from './db/prisma';
 import type { Server } from 'http';
@@ -33,7 +33,7 @@ async function login(email = EMAIL, password = PASSWORD): Promise<string> {
 }
 
 async function resetUser(): Promise<void> {
-  const institution = await prisma.institution.findUniqueOrThrow({ where: { domain: 'demo.lab' } });
+  const institution = await prisma.institution.upsert({ where: { domain: 'demo.lab' }, update: {}, create: { name: 'Demo College', domain: 'demo.lab' } });
   await prisma.user.upsert({
     where: { email: EMAIL },
     update: { passwordHash: hashPassword(PASSWORD), role: 'TEACHER' },
@@ -126,6 +126,26 @@ test('repeated failures are rate limited per address and email, even with the ri
   }
   await login();
   assert.equal((await post('/api/auth/login', { email: EMAIL, password: 'Wrong-again-password' })).status, 401);
+});
+
+test('concurrent wrong guesses cannot exceed the failure budget', async () => {
+  const results = await Promise.all(Array.from({ length: 25 }, (_, attempt) => post('/api/auth/login', { email: EMAIL, password: `Parallel-${attempt}-guess` })));
+  const statuses = results.map((result) => result.status);
+  assert.equal(statuses.filter((status) => status === 401).length, 10);
+  assert.equal(statuses.filter((status) => status === 429).length, 15);
+});
+
+test('guessing the current password on the change endpoint is rate limited', async (t) => {
+  t.after(() => passwordChangeLimiter.reset());
+  const token = await login();
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const wrong = await post('/api/auth/password', { currentPassword: `Wrong-${attempt}-current`, newPassword: 'Correct-Horse-Battery-2026' }, token);
+    assert.equal(wrong.status, 403);
+  }
+  const blocked = await post('/api/auth/password', { currentPassword: PASSWORD, newPassword: 'Correct-Horse-Battery-2026' }, token);
+  assert.equal(blocked.status, 429);
+  assert.equal(await prisma.auditLog.count({ where: { action: 'password_change_failed', entityId: (await prisma.user.findUniqueOrThrow({ where: { email: EMAIL } })).id } }) >= 5, true);
+  await login();
 });
 
 test('password change enforces policy, needs the current password, and revokes other sessions', async (t) => {

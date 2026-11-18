@@ -40,6 +40,12 @@ export function hashPassword(password: string): string {
   return `scrypt$${salt}$${hash}`;
 }
 
+export async function hashPasswordAsync(password: string): Promise<string> {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = await scryptAsync(password, salt, SCRYPT_KEYLEN);
+  return `scrypt$${salt}$${hash.toString('hex')}`;
+}
+
 // Precomputed so a login for an unknown email spends the same scrypt time as a real one.
 const DUMMY_HASH = hashPassword(crypto.randomBytes(16).toString('hex'));
 
@@ -110,7 +116,12 @@ export async function destroyUserSessions(userId: string, exceptSessionId?: stri
   return result.count;
 }
 
-export async function purgeExpiredSessions(): Promise<number> {
+const PURGE_INTERVAL_MS = 60_000;
+let lastPurgeAt = 0;
+
+export async function purgeExpiredSessions(force = false): Promise<number> {
+  if (!force && Date.now() - lastPurgeAt < PURGE_INTERVAL_MS) return 0;
+  lastPurgeAt = Date.now();
   const result = await prisma.session.deleteMany({
     where: { OR: [{ expiresAt: { lte: new Date() } }, { lastUsedAt: { lte: new Date(Date.now() - SESSION_IDLE_MS) } }] },
   });

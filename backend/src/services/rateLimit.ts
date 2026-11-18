@@ -1,3 +1,17 @@
+import net from 'net';
+
+// IPv6 clients usually control a whole /64, so limit by that prefix rather than the full address.
+export function clientAddressKey(ip: string | undefined): string {
+  if (!ip) return 'unknown';
+  const mapped = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+  if (!net.isIPv6(mapped)) return mapped;
+  const [head, tail = ''] = mapped.split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const groups = mapped.includes('::') ? [...left, ...Array(8 - left.length - right.length).fill('0'), ...right] : left;
+  return `${groups.slice(0, 4).map((group) => group.toLowerCase().replace(/^0+(?=.)/, '')).join(':')}::/64`;
+}
+
 interface Entry {
   count: number;
   resetAt: number;
@@ -23,6 +37,13 @@ export class FailureLimiter {
       return;
     }
     entry.count += 1;
+  }
+
+  release(key: string): void {
+    const entry = this.entries.get(key);
+    if (!entry) return;
+    entry.count -= 1;
+    if (entry.count <= 0) this.entries.delete(key);
   }
 
   clear(key: string): void {

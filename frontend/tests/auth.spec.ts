@@ -22,13 +22,21 @@ async function changePassword(page: Page, from: string, to: string) {
 }
 
 // The demo database is shared with the other specs, so always put the seeded password back.
+// Try the seeded password first so a passing run never records a failed sign-in.
 async function restorePassword(request: APIRequestContext) {
-  const login = await request.post(`${API}/api/auth/login`, { data: { email: EMAIL, password: TEMPORARY } });
-  if (login.status() !== 200) return;
-  const { token } = await login.json() as { token: string };
-  const headers = { Authorization: `Bearer ${token}` };
-  await request.post(`${API}/api/auth/password`, { headers, data: { currentPassword: TEMPORARY, newPassword: PASSWORD } });
-  await request.post(`${API}/api/auth/logout`, { headers });
+  for (const password of [PASSWORD, TEMPORARY]) {
+    const login = await request.post(`${API}/api/auth/login`, { data: { email: EMAIL, password } });
+    if (login.status() !== 200) continue;
+    const { token } = await login.json() as { token: string };
+    const headers = { Authorization: `Bearer ${token}` };
+    if (password === TEMPORARY) {
+      const restored = await request.post(`${API}/api/auth/password`, { headers, data: { currentPassword: TEMPORARY, newPassword: PASSWORD } });
+      expect(restored.status()).toBe(200);
+    }
+    await request.post(`${API}/api/auth/logout`, { headers });
+    return;
+  }
+  throw new Error(`Could not restore the demo password for ${EMAIL}; restart the API with SEED_ON_BOOT=true`);
 }
 
 test('password change follows the policy and signs out other sessions', async ({ page, browser, request }) => {

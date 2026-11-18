@@ -8,7 +8,7 @@ export default defineConfig({
     host: '0.0.0.0',
     strictPort: true,
     proxy: {
-      '/api': 'http://127.0.0.1:3001',
+      '/api': { target: 'http://127.0.0.1:3001', xfwd: true },
     },
   },
 })

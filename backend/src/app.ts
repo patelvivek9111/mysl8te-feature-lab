@@ -6,10 +6,10 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import prisma from './db/prisma';
 import {
-  AuthUser, PASSWORD_MAX_LENGTH, createSession, destroySession, destroyUserSessions, hashPassword,
-  passwordPolicyErrors, purgeExpiredSessions, resolveSession, verifyPassword,
+  AuthUser, PASSWORD_MAX_LENGTH, createSession, destroySession, destroyUserSessions, hashPasswordAsync,
+  hashToken, passwordPolicyErrors, purgeExpiredSessions, resolveSession, verifyPassword,
 } from './services/auth';
-import { FailureLimiter } from './services/rateLimit';
+import { FailureLimiter, clientAddressKey } from './services/rateLimit';
 import { canReadSubmission, loadSubmission, studentView, studiesCourse, teachesCourse } from './services/access';
 import { assertMagic, EXTENSION_TO_FORMAT, formatSupport, uploadDir } from './services/extract';
 import { buildSimilarityReport } from './services/similarity';
@@ -32,8 +32,15 @@ export const loginLimiters = {
   address: new FailureLimiter(Number(process.env.LOGIN_MAX_FAILURES_PER_IP || 50), LOGIN_WINDOW_MS),
 };
 
+export const passwordChangeLimiter = new FailureLimiter(Number(process.env.PASSWORD_CHANGE_MAX_FAILURES || 5), LOGIN_WINDOW_MS);
+
 const EMAIL_MAX_LENGTH = 254;
 const INVALID_LOGIN = 'Email or password is incorrect';
+
+function tooManyAttempts(res: Response, retryAfter: number): void {
+  res.setHeader('Retry-After', String(retryAfter));
+  res.status(429).json({ error: 'Too many attempts. Try again later.' });
+}
 
 async function auth(req: AuthedRequest, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -74,6 +81,8 @@ async function audit(userId: string | undefined, action: string, entity: string,
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
+  const trustProxy = process.env.TRUST_PROXY;
+  app.set('trust proxy', trustProxy && /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy || 'loopback');
   app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -110,26 +119,33 @@ export function createApp() {
         res.status(400).json({ error: 'Email and password are required' });
         return;
       }
-      const ip = req.ip || req.socket.remoteAddress || 'unknown';
+      const ip = clientAddressKey(req.ip || req.socket.remoteAddress);
       const accountKey = `${ip}|${email}`;
       const retryAfter = Math.max(loginLimiters.address.retryAfterSeconds(ip), loginLimiters.account.retryAfterSeconds(accountKey));
       if (retryAfter > 0) {
-        res.setHeader('Retry-After', String(retryAfter));
-        res.status(429).json({ error: 'Too many sign-in attempts. Try again later.' });
+        tooManyAttempts(res, retryAfter);
         return;
       }
+      // Count the attempt before the slow hash so concurrent guesses cannot all slip under the limit.
+      loginLimiters.address.recordFailure(ip);
+      loginLimiters.account.recordFailure(accountKey);
       const user = await prisma.user.findUnique({ where: { email } });
       const ok = await verifyPassword(password, user?.passwordHash);
       if (!user || !ok) {
-        loginLimiters.address.recordFailure(ip);
-        loginLimiters.account.recordFailure(accountKey);
         await audit(user?.id, 'login_failed', 'user', user?.id ?? 'unknown');
         res.status(401).json({ error: INVALID_LOGIN });
         return;
       }
+      loginLimiters.address.release(ip);
       loginLimiters.account.clear(accountKey);
       const authUser: AuthUser = { id: user.id, email: user.email, name: user.name, role: user.role };
       const session = await createSession(user.id);
+      const current = await prisma.user.findUnique({ where: { id: user.id }, select: { passwordHash: true } });
+      if (current?.passwordHash !== user.passwordHash) {
+        await prisma.session.deleteMany({ where: { tokenHash: hashToken(session.token) } });
+        res.status(401).json({ error: INVALID_LOGIN });
+        return;
+      }
       await audit(user.id, 'login', 'user', user.id);
       purgeExpiredSessions().catch(() => undefined);
       res.json({ token: session.token, expiresAt: session.expiresAt.toISOString(), user: authUser });
@@ -170,18 +186,34 @@ export function createApp() {
         res.status(400).json({ error: 'Current password is required' });
         return;
       }
+      const limiterKey = req.user!.id;
+      const retryAfter = passwordChangeLimiter.retryAfterSeconds(limiterKey);
+      if (retryAfter > 0) {
+        tooManyAttempts(res, retryAfter);
+        return;
+      }
+      passwordChangeLimiter.recordFailure(limiterKey);
       const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
       if (!user || !(await verifyPassword(currentPassword, user.passwordHash))) {
+        await audit(req.user!.id, 'password_change_failed', 'user', req.user!.id);
         res.status(403).json({ error: 'Current password is incorrect' });
         return;
       }
+      passwordChangeLimiter.release(limiterKey);
       const problems = passwordPolicyErrors(newPassword, { email: user.email, name: user.name });
       if (newPassword === currentPassword) problems.push('Choose a password you have not just used');
       if (problems.length) {
         res.status(400).json({ error: problems.join('. '), details: problems });
         return;
       }
-      await prisma.user.update({ where: { id: user.id }, data: { passwordHash: hashPassword(newPassword) } });
+      const written = await prisma.user.updateMany({
+        where: { id: user.id, passwordHash: user.passwordHash },
+        data: { passwordHash: await hashPasswordAsync(newPassword) },
+      });
+      if (written.count === 0) {
+        res.status(409).json({ error: 'The password changed while this request was running. Sign in again.' });
+        return;
+      }
       const revoked = await destroyUserSessions(user.id, req.sessionId);
       await audit(user.id, 'password_change', 'user', user.id, { revokedOtherSessions: revoked });
       res.json({ ok: true, revokedOtherSessions: revoked });

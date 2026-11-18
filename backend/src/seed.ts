@@ -31,7 +31,7 @@ export async function seedDemo(): Promise<void> {
   });
   const teacher = await prisma.user.upsert({
     where: { email: DEMO_ACCOUNTS.teacher.email },
-    update: { name: DEMO_ACCOUNTS.teacher.name, role: 'TEACHER' },
+    update: { name: DEMO_ACCOUNTS.teacher.name, role: 'TEACHER', passwordHash: hashPassword(DEMO_ACCOUNTS.teacher.password) },
     create: {
       email: DEMO_ACCOUNTS.teacher.email,
       name: DEMO_ACCOUNTS.teacher.name,
@@ -42,7 +42,7 @@ export async function seedDemo(): Promise<void> {
   });
   const grace = await prisma.user.upsert({
     where: { email: DEMO_ACCOUNTS.grace.email },
-    update: { name: DEMO_ACCOUNTS.grace.name, role: 'STUDENT' },
+    update: { name: DEMO_ACCOUNTS.grace.name, role: 'STUDENT', passwordHash: hashPassword(DEMO_ACCOUNTS.grace.password) },
     create: {
       email: DEMO_ACCOUNTS.grace.email,
       name: DEMO_ACCOUNTS.grace.name,
@@ -53,7 +53,7 @@ export async function seedDemo(): Promise<void> {
   });
   const alan = await prisma.user.upsert({
     where: { email: DEMO_ACCOUNTS.alan.email },
-    update: { name: DEMO_ACCOUNTS.alan.name, role: 'STUDENT' },
+    update: { name: DEMO_ACCOUNTS.alan.name, role: 'STUDENT', passwordHash: hashPassword(DEMO_ACCOUNTS.alan.password) },
     create: {
       email: DEMO_ACCOUNTS.alan.email,
       name: DEMO_ACCOUNTS.alan.name,

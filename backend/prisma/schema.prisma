@@ -53,6 +53,7 @@ model Session {
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([lastUsedAt])
   @@map("sessions")
 }
 
