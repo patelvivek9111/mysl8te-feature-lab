@@ -5,6 +5,19 @@
 
 ---
 
+## ADR-011: Admins oversee AI-writing signals read-only; only course teachers decide
+
+**Date**: 2026-11-18  
+**Status**: ACCEPTED
+
+Admins can open any submission in their deployment, including the AI-writing assessment, its safeguards, and the recorded teacher review, so they can audit how signals are used. They cannot record or change a review decision and cannot recalculate similarity. Only a teacher of the course does either. Students never receive AI-writing signals (ADR-007 restoration entry).
+
+Rationale: the review is a judgement about a student's work by the person who knows the course, and the signal is not validated (0 of 6 release gates). An admin decision would carry institutional weight without that context. Oversight still needs read access, and review history is kept in the audit log (`ai_review`, `ai_review_superseded`, `similarity_recalculate`).
+
+Related: a similarity recalculation rebuilds the AI assessment only when its paraphrase signal changes (the only similarity-dependent field). An earlier review then moves to the audit log with reason `similarity_recalculated`. Excluded regions store character offsets; reports written before that get offsets recomputed at boot from the text and the report's own options, using the current exclusion rules, without re-matching.
+
+Enforced by `backend/src/product.test.ts` ("teachers outside the course and admins cannot review...", "recalculating similarity refreshes the paraphrase context...").
+
 ## ADR-010: One canonical branch on PostgreSQL; SQLite branch frozen
 
 **Date**: 2026-11-18  
