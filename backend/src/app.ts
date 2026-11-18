@@ -14,6 +14,7 @@ import { canReadSubmission, loadSubmission, studentView, studiesCourse, teachesC
 import { assertMagic, EXTENSION_TO_FORMAT, formatSupport, uploadDir } from './services/extract';
 import { buildSimilarityReport } from './services/similarity';
 import { REVIEW_DECISIONS } from './services/aiAssessment';
+import { renderFeedbackPdf } from './services/pdfExport';
 import { AnnotationType } from '@prisma/client';
 
 export interface AuthedRequest extends Request {
@@ -712,23 +713,46 @@ export function createApp() {
         return;
       }
       const visible = studentView(req.user!, submission);
-      const lines = [
-        `# ${submission.assignment.title}`,
-        `Student: ${submission.student.name}`,
-        '',
-        visible.grade ? `Score: ${visible.grade.score} / ${visible.grade.maxScore}` : 'Score: not published',
-        visible.grade?.feedback ? `Feedback: ${visible.grade.feedback}` : '',
-        '',
-        '## Annotations',
-        ...visible.annotations.map((annotation) => `- ${annotation.type}: ${annotation.content || ''} ${JSON.stringify(annotation.anchor ?? {})}`),
-        '',
-        '## Document text',
-        submission.document.textContent || '(no extracted text)',
-        '',
-        'This export is a text transcript. It is not a pixel-perfect annotated original.',
-      ];
-      res.setHeader('Content-Disposition', 'attachment; filename="feedback.txt"');
-      res.type('text/plain').send(lines.filter((line) => line !== undefined).join('\n'));
+      const replyAuthorIds = [...new Set(visible.annotations.flatMap((annotation) => annotation.comments.map((comment) => comment.createdById)))];
+      const replyAuthors = new Map((await prisma.user.findMany({ where: { id: { in: replyAuthorIds } }, select: { id: true, name: true } }))
+        .map((user) => [user.id, user.name]));
+      let originalPdf: Uint8Array | null = null;
+      if (submission.document.format === 'PDF') {
+        originalPdf = await fs.readFile(path.join(uploadDir(), submission.document.storedFilename)).catch(() => null);
+      }
+      const pdf = await renderFeedbackPdf({
+        assignmentTitle: submission.assignment.title,
+        courseCode: submission.assignment.course.code,
+        studentName: submission.student.name,
+        version: submission.version,
+        submittedAt: submission.submittedAt,
+        fileName: submission.document.originalFilename,
+        format: submission.document.format,
+        text: submission.document.textContent,
+        originalPdf,
+        grade: visible.grade
+          ? { ...visible.grade, rubricScores: (visible.grade.rubricScores as Record<string, number> | null) ?? null }
+          : null,
+        rubric: (submission.assignment.rubric?.criteria ?? []).map((criterion) => ({
+          id: criterion.id,
+          title: criterion.title,
+          points: criterion.points,
+          ratings: criterion.ratings.map((rating) => ({ title: rating.title, points: rating.points })),
+        })),
+        annotations: visible.annotations.map((annotation) => ({
+          ...annotation,
+          authorName: annotation.createdBy.name,
+          replies: annotation.comments
+            .slice()
+            .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+            .map((comment) => ({ authorName: replyAuthors.get(comment.createdById) ?? 'Unknown', content: comment.content, isDraft: comment.isDraft })),
+        })),
+      });
+      await audit(req.user!.id, 'export_feedback', 'submission', submission.id);
+      const base = submission.assignment.title.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'submission';
+      res.setHeader('Content-Disposition', `attachment; filename="feedback-${base}.pdf"`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.type('application/pdf').send(Buffer.from(pdf));
     } catch (error) {
       next(error);
     }

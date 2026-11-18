@@ -430,10 +430,10 @@ function Review() {
           const url = URL.createObjectURL(blob)
           const link = document.createElement('a')
           link.href = url
-          link.download = 'feedback.txt'
+          link.download = 'feedback.pdf'
           link.click()
           URL.revokeObjectURL(url)
-        }}>Download feedback transcript</a>
+        }}>Download annotated feedback (PDF)</a>
       </div>
       <aside className="side">
         {teacher && students.size > 1 && (

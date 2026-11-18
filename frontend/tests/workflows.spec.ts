@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 test('teacher publishes feedback and the student can read it', async ({ page }) => {
   await page.goto('/login');
@@ -54,6 +56,19 @@ test('teacher publishes feedback and the student can read it', async ({ page }) 
   await expect(page.getByText('Draft is hidden from the student.')).toHaveCount(0);
   await expect(page.getByTestId('document-text')).toContainText('truth universally acknowledged');
   await expect(page.getByTestId('ai-report')).toHaveCount(0);
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByTestId('export-feedback').click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('feedback.pdf');
+  const file = await download.path();
+  expect(readFileSync(file).subarray(0, 5).toString()).toBe('%PDF-');
+  const exported = execFileSync('pdftotext', ['-layout', file, '-'], { encoding: 'utf8' });
+  expect(exported).toContain('Feedback: Opening paragraph close reading');
+  expect(exported).toContain('The quotation is specific. Say who is certain.');
+  expect(exported).toMatch(/#\d+ Highlight - Ada Lovelace/);
+  expect(exported).not.toContain('(draft');
+  expect(exported).not.toMatch(/writing signal|AI-writing/i);
 });
 
 test('student uploads a text file and sees processing complete', async ({ page }) => {

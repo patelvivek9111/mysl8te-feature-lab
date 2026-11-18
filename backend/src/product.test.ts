@@ -16,6 +16,7 @@ import type { AddressInfo } from 'net';
 
 let server: Server;
 let base = '';
+let pdfSubmissionId = '';
 
 async function login(email: string, password: string): Promise<string> {
   const response = await fetch(`${base}/api/auth/login`, {
@@ -136,6 +137,7 @@ trailer<< /Root 1 0 R >>
   const submission = await json(`/api/submissions/${created.submissionId}`, alan);
   assert.equal(submission.body.submission.document.processingStatus, 'COMPLETED');
   assert.match(submission.body.submission.document.textContent, /Hello from the lab/);
+  pdfSubmissionId = created.submissionId;
   assert.match(submission.body.submission.document.metadata.note, /extracted text/);
 });
 
@@ -330,4 +332,82 @@ test('teachers outside the course and admins cannot review, and superseded revie
   assert.match(after.body.submission.aiAssessment.features.modelVersion, /experimental/);
   const history = await prisma.auditLog.findMany({ where: { entityId: submissionId, action: 'ai_review_superseded' } });
   assert.equal(history.some((row) => (row.changes as { note?: string } | null)?.note === note), true);
+});
+
+async function exportPdf(submissionId: string, token?: string) {
+  const response = await fetch(`${base}/api/submissions/${submissionId}/export`, token ? { headers: { Authorization: `Bearer ${token}` } } : {});
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const text = response.headers.get('content-type')?.startsWith('application/pdf')
+    ? (await promisify(execFile)('pdftotext', ['-layout', await writeTemp(bytes), '-'])).stdout
+    : '';
+  return { status: response.status, headers: response.headers, bytes, text };
+}
+
+async function writeTemp(bytes: Buffer): Promise<string> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'export-'));
+  const file = path.join(dir, 'feedback.pdf');
+  await fs.writeFile(file, bytes);
+  return file;
+}
+
+test('feedback export is an annotated PDF that hides drafts from students', async () => {
+  const teacher = await login(DEMO_ACCOUNTS.teacher.email, DEMO_ACCOUNTS.teacher.password);
+  const grace = await login(DEMO_ACCOUNTS.grace.email, DEMO_ACCOUNTS.grace.password);
+  const alan = await login(DEMO_ACCOUNTS.alan.email, DEMO_ACCOUNTS.alan.password);
+  const courses = await json('/api/courses', teacher);
+  const course = await json(`/api/courses/${courses.body.courses[0].id}`, teacher);
+  const assignment = course.body.course.assignments.find((item: { title: string }) => item.title === 'Opening paragraph close reading');
+  const submissionId = assignment.submissions[0].id as string;
+  const secret = `Draft export note ${Date.now()}`;
+  const draft = await json(`/api/submissions/${submissionId}/annotations`, teacher, {
+    method: 'POST',
+    body: JSON.stringify({ type: 'UNDERLINE', content: secret, anchor: { kind: 'text', start: 0, end: 20 } }),
+  });
+  assert.equal(draft.status, 201);
+  try {
+    const teacherExport = await exportPdf(submissionId, teacher);
+    assert.equal(teacherExport.status, 200);
+    assert.match(teacherExport.headers.get('content-type') ?? '', /^application\/pdf/);
+    assert.match(teacherExport.headers.get('content-disposition') ?? '', /attachment; filename="feedback-Opening-paragraph-close-reading\.pdf"/);
+    assert.equal(teacherExport.bytes.subarray(0, 5).toString(), '%PDF-');
+    assert.match(teacherExport.text, /Feedback: Opening paragraph close reading/);
+    assert.match(teacherExport.text, /Underline - Ada Lovelace \(draft\)/);
+    assert.ok(teacherExport.text.includes(secret));
+    assert.match(teacherExport.text, /truth universally acknowledged/);
+
+    const studentExport = await exportPdf(submissionId, grace);
+    assert.equal(studentExport.status, 200);
+    assert.equal(studentExport.text.includes(secret), false);
+    assert.equal(studentExport.text.includes('(draft'), false);
+
+    assert.equal((await exportPdf(submissionId, alan)).status, 403);
+    assert.equal((await exportPdf(submissionId)).status, 401);
+    const logged = await prisma.auditLog.count({ where: { entityId: submissionId, action: 'export_feedback' } });
+    assert.ok(logged >= 2);
+  } finally {
+    await json(`/api/annotations/${draft.body.annotation.id}`, teacher, { method: 'DELETE' });
+  }
+});
+
+test('feedback export of a PDF submission embeds the original pages', async () => {
+  assert.ok(pdfSubmissionId, 'the PDF upload test must run first');
+  const teacher = await login(DEMO_ACCOUNTS.teacher.email, DEMO_ACCOUNTS.teacher.password);
+  const area = await json(`/api/submissions/${pdfSubmissionId}/annotations`, teacher, {
+    method: 'POST',
+    body: JSON.stringify({ type: 'AREA', page: 1, x: 5, y: 10, width: 60, height: 40, content: 'Boxed region note' }),
+  });
+  assert.equal(area.status, 201);
+  try {
+    const exported = await exportPdf(pdfSubmissionId, teacher);
+    assert.equal(exported.status, 200);
+    assert.match(exported.text, /Hello from the lab/);
+    assert.match(exported.text, /#1 Area comment - Ada Lovelace \(draft\)/);
+    assert.match(exported.text, /Boxed region note/);
+    const { PDFDocument } = await import('pdf-lib');
+    const doc = await PDFDocument.load(exported.bytes);
+    const last = doc.getPage(doc.getPageCount() - 1).getSize();
+    assert.deepEqual([last.width, last.height], [300, 144]);
+  } finally {
+    await json(`/api/annotations/${area.body.annotation.id}`, teacher, { method: 'DELETE' });
+  }
 });
