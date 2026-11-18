@@ -79,6 +79,15 @@ a.ghost { text-decoration: none; }
 }
 mark.highlight { background: #f6de9a; }
 mark.underline { background: transparent; text-decoration: underline 3px #2a6f97; }
+mark.match-exact { background: #f4c7c3; color: inherit; }
+mark.match-near { background: #fbe3c4; color: inherit; text-decoration: underline dotted 2px #a0522d; }
+mark.excluded { background: #e4e1dc; color: #4f4a43; text-decoration: line-through 1px #8a837a; }
+.layer-toggle { display: flex; flex-wrap: wrap; gap: 0.8rem; border: 1px solid #ddd4c4; border-radius: 12px; padding: 0.4rem 0.8rem; margin: 0.6rem 0; }
+.legend mark { padding: 0 0.3rem; border-radius: 4px; }
+.similarity-options { display: grid; gap: 0.5rem; margin-top: 0.8rem; border-top: 1px solid #ddd4c4; padding-top: 0.6rem; }
+.similarity-options h3 { margin: 0; font-size: 1rem; }
+.similarity-options .check { display: flex; gap: 0.4rem; align-items: center; }
+.similarity-options button { justify-self: start; }
 .button-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0; }
 .pdf-frame, .image-preview { width: 100%; min-height: 280px; border: 0; background: white; border-radius: 12px; }
 .warning { border-color: #e1c16d; }

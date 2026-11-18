@@ -78,7 +78,7 @@ export async function refreshStaleAnalyses(): Promise<number> {
         excludeSmallMatches: stored.excludeSmallMatches,
         smallMatchThreshold: stored.smallMatchThreshold,
       } : undefined);
-      await storeAiAssessment(submissionId, submission.document.textContent ?? '', similarity);
+      await storeAiAssessment(submissionId, submission.document.textContent ?? '', similarity, 'model_version_changed');
       refreshed += 1;
     } catch (error) {
       console.error(JSON.stringify({ level: 'error', message: 'stale analysis refresh failed', submissionId, error: String(error) }));
@@ -87,7 +87,56 @@ export async function refreshStaleAnalyses(): Promise<number> {
   return refreshed;
 }
 
-export async function storeAiAssessment(submissionId: string, text: string, similarity: SimilarityResult | null): Promise<void> {
+// Reports written before excluded-region offsets were stored are rebuilt with their own options.
+export async function backfillExcludedOffsets(): Promise<number> {
+  const legacy = await prisma.similarityReport.findMany({
+    where: { excludedMatches: { some: { startPosition: null } } },
+    select: { submissionId: true, excludeQuotes: true, excludeBibliography: true, excludeSmallMatches: true, smallMatchThreshold: true },
+  });
+  let rebuilt = 0;
+  for (const { submissionId, ...options } of legacy) {
+    try {
+      const similarity = await buildSimilarityReport(submissionId, options);
+      const submission = await prisma.submission.findUnique({ where: { id: submissionId }, include: { document: true } });
+      await refreshAfterSimilarity(submissionId, submission?.document.textContent ?? '', similarity);
+      rebuilt += 1;
+    } catch (error) {
+      console.error(JSON.stringify({ level: 'error', message: 'excluded offset backfill failed', submissionId, error: String(error) }));
+    }
+  }
+  return rebuilt;
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const keysA = Object.keys(a).filter((key) => (a as Record<string, unknown>)[key] !== undefined);
+  const keysB = Object.keys(b).filter((key) => (b as Record<string, unknown>)[key] !== undefined);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every((key) => sameJson((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
+}
+
+// Only the paraphrase signal depends on similarity. When recalculation leaves it unchanged the
+// stored assessment and its teacher review stay as they are; otherwise the assessment is rebuilt
+// and the earlier review is moved to the audit log.
+export async function refreshAfterSimilarity(submissionId: string, text: string, similarity: SimilarityResult | null): Promise<boolean> {
+  const existing = await prisma.aiAssessment.findUnique({ where: { submissionId } });
+  if (!existing || existing.status !== 'COMPLETED') return false;
+  const record = assessmentRecord(text, similarity);
+  const stored = existing.features as { paraphraseSignal?: unknown; modelVersion?: string } | null;
+  const next = record.features as { paraphraseSignal?: unknown; modelVersion?: string };
+  if (stored?.modelVersion === next.modelVersion && sameJson(stored?.paraphraseSignal, next.paraphraseSignal)) return false;
+  await storeAiAssessment(submissionId, text, similarity, 'similarity_recalculated');
+  return true;
+}
+
+export async function storeAiAssessment(
+  submissionId: string,
+  text: string,
+  similarity: SimilarityResult | null,
+  reason: 'reprocessed' | 'model_version_changed' | 'similarity_recalculated' = 'reprocessed',
+): Promise<void> {
   const record = assessmentRecord(text, similarity);
   const reviewReset = { reviewDecision: null, reviewNote: null, reviewedById: null, reviewedAt: null };
   await prisma.$transaction(async (tx) => {
@@ -100,6 +149,7 @@ export async function storeAiAssessment(submissionId: string, text: string, simi
           entity: 'submission',
           entityId: submissionId,
           changes: {
+            reason,
             decision: previous.reviewDecision,
             note: previous.reviewNote,
             reviewedAt: previous.reviewedAt?.toISOString() ?? null,

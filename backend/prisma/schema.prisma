@@ -510,6 +510,9 @@ model ExcludedMatch {
   
   text String @db.Text
   reason ExclusionReason
+  // Character offsets into the extracted text; null on rows written before offsets were stored.
+  startPosition Int? @map("start_position")
+  endPosition Int? @map("end_position")
   
   excludedAt DateTime @default(now()) @map("excluded_at")
   

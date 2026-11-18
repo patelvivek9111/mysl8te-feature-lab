@@ -36,6 +36,26 @@ interface Annotation {
   createdBy: { name: string }
 }
 
+interface SimilarityReportView {
+  overallSimilarity: number
+  excludeQuotes: boolean
+  excludeBibliography: boolean
+  excludeSmallMatches: boolean
+  smallMatchThreshold: number
+  sources: Array<{
+    id: string
+    sourceName: string
+    sourceType: string
+    similarityPercentage: number
+    passages: Array<{ id: string; submissionText: string; matchType: string; startPosition: number; endPosition: number }>
+  }>
+  excludedMatches: Array<{ id: string; reason: string; startPosition: number | null; endPosition: number | null }>
+}
+
+type Piece = { text: string; mark: string | null; comment: string | null }
+
+interface SimilarityOptionsForm { excludeQuotes: boolean; excludeBibliography: boolean; excludeSmallMatches: boolean; smallMatchThreshold: string }
+
 interface SubmissionDetail {
   id: string
   status: string
@@ -53,11 +73,7 @@ interface SubmissionDetail {
   assignment: AssignmentDetail & { courseId: string; title: string }
   grade: { score: number; maxScore: number; feedback: string | null; isDraft: boolean; rubricScores: Record<string, number> | null } | null
   annotations: Annotation[]
-  similarityReport: {
-    overallSimilarity: number
-    sources: Array<{ id: string; sourceName: string; sourceType: string; similarityPercentage: number; passages: Array<{ id: string; submissionText: string; matchType: string }> }>
-    excludedMatches: Array<{ id: string; reason: string }>
-  } | null
+  similarityReport: SimilarityReportView | null
   aiAssessment: AiAssessment | null
 }
 
@@ -298,6 +314,13 @@ function Review() {
   const [comment, setComment] = useState('Look at how certain the families sound.')
   const [error, setError] = useState('')
   const [mediaUrl, setMediaUrl] = useState<string | null>(null)
+  const [layer, setLayer] = useState<'annotations' | 'similarity'>('annotations')
+  const [editedOptions, setEditedOptions] = useState<{ submissionId: string; value: SimilarityOptionsForm } | null>(null)
+  const [recalculating, setRecalculating] = useState(false)
+  const [recalcNotice, setRecalcNotice] = useState<{ submissionId: string; text: string } | null>(null)
+  const similarityOptions = editedOptions?.submissionId === submissionId ? editedOptions.value : null
+  const setSimilarityOptions = (value: SimilarityOptionsForm | null) => setEditedOptions(value ? { submissionId, value } : null)
+  const recalcMessage = recalcNotice?.submissionId === submissionId ? recalcNotice.text : ''
 
   async function reload() {
     const next = await api<{ submission: SubmissionDetail; navigation: Array<{ id: string; version: number; student: { id: string; name: string } }> }>(`/api/submissions/${submissionId}`)
@@ -337,10 +360,50 @@ function Review() {
   }, [data?.submission.document.id, data?.submission.document.metadata?.previewKind])
 
   const text = data?.submission.document.textContent ?? ''
-  const pieces = useMemo(() => renderPieces(text, data?.submission.annotations ?? []), [text, data])
+  const pieces = useMemo(
+    () => layer === 'similarity' ? renderSimilarityPieces(text, data?.submission.similarityReport ?? null) : renderPieces(text, data?.submission.annotations ?? []),
+    [text, data, layer],
+  )
   if (!data) return <p>Loading submission…</p>
   const submission = data.submission
   const teacher = user?.role === 'TEACHER'
+  const report = submission.similarityReport
+  const options = similarityOptions ?? (report ? {
+    excludeQuotes: report.excludeQuotes,
+    excludeBibliography: report.excludeBibliography,
+    excludeSmallMatches: report.excludeSmallMatches,
+    smallMatchThreshold: String(report.smallMatchThreshold),
+  } : null)
+
+  async function recalculate(event: FormEvent) {
+    event.preventDefault()
+    if (!options) return
+    const threshold = Number(options.smallMatchThreshold)
+    if (!Number.isInteger(threshold) || threshold < 1 || threshold > 200) {
+      setError('Minimum match length must be a whole number from 1 to 200 words.')
+      return
+    }
+    setRecalculating(true)
+    setError('')
+    try {
+      const result = await api<{ aiAssessmentRefreshed: boolean }>(`/api/submissions/${submission.id}/similarity/recalculate`, {
+        method: 'POST',
+        body: JSON.stringify({ ...options, smallMatchThreshold: threshold }),
+      })
+      setSimilarityOptions(null)
+      setRecalcNotice({
+        submissionId: submission.id,
+        text: result.aiAssessmentRefreshed
+          ? 'Similarity recalculated. The paraphrase context changed, so the writing-signal assessment was rebuilt and needs a new review.'
+          : 'Similarity recalculated.',
+      })
+      await reload()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not recalculate similarity')
+    } finally {
+      setRecalculating(false)
+    }
+  }
 
   function rememberSelection() {
     pendingAnchor.current = selectionAnchor(textRef.current, text)
@@ -418,9 +481,21 @@ function Review() {
         {mediaUrl && submission.document.metadata?.previewKind === 'image' && <img alt="Uploaded image preview" className="image-preview" src={mediaUrl} />}
         {mediaUrl && submission.document.metadata?.previewKind === 'audio' && <audio controls src={mediaUrl} />}
         {mediaUrl && submission.document.metadata?.previewKind === 'video' && <video controls className="image-preview" src={mediaUrl} />}
+        {text && (
+          <fieldset className="layer-toggle">
+            <legend>Show in document</legend>
+            <label><input type="radio" name="layer" data-testid="layer-annotations" checked={layer === 'annotations'} onChange={() => setLayer('annotations')} /> Annotations</label>
+            <label><input type="radio" name="layer" data-testid="layer-similarity" checked={layer === 'similarity'} onChange={() => setLayer('similarity')} disabled={!report} /> Similarity matches and exclusions</label>
+          </fieldset>
+        )}
+        {layer === 'similarity' && report && (
+          <p className="note legend" data-testid="similarity-legend">
+            <mark className="match-exact">Exact match</mark> <mark className="match-near">Near match</mark> <mark className="excluded">Excluded from matching</mark> Hover a span to see its source or exclusion reason.
+          </p>
+        )}
         <div ref={textRef} className="document" data-testid="document-text" onMouseUp={rememberSelection}>
           {pieces.map((piece, index) => piece.mark
-            ? <mark key={index} className={piece.mark === 'UNDERLINE' ? 'underline' : 'highlight'} title={piece.comment || undefined}>{piece.text}</mark>
+            ? <mark key={index} className={MARK_CLASSES[piece.mark] ?? 'highlight'} data-mark={piece.mark} title={piece.comment || undefined}>{piece.text}</mark>
             : <span key={index}>{piece.text}</span>)}
           {!text && <p>No extracted text for this file.</p>}
         </div>
@@ -516,6 +591,17 @@ function Review() {
                   Excluded from matching: {[...new Set(submission.similarityReport.excludedMatches.map((item) => item.reason.toLowerCase()))].join(', ')}.
                 </p>
               )}
+              {teacher && options && (
+                <form className="similarity-options" data-testid="similarity-options" onSubmit={recalculate}>
+                  <h3>Matching options</h3>
+                  <label className="check"><input type="checkbox" data-testid="opt-exclude-quotes" checked={options.excludeQuotes} onChange={(event) => setSimilarityOptions({ ...options, excludeQuotes: event.target.checked })} /> Exclude quotations</label>
+                  <label className="check"><input type="checkbox" data-testid="opt-exclude-bibliography" checked={options.excludeBibliography} onChange={(event) => setSimilarityOptions({ ...options, excludeBibliography: event.target.checked })} /> Exclude bibliography</label>
+                  <label className="check"><input type="checkbox" data-testid="opt-exclude-small" checked={options.excludeSmallMatches} onChange={(event) => setSimilarityOptions({ ...options, excludeSmallMatches: event.target.checked })} /> Exclude matches shorter than</label>
+                  <label>Minimum match length (words)<input data-testid="opt-threshold" type="number" min={1} max={200} step={1} value={options.smallMatchThreshold} disabled={!options.excludeSmallMatches} onChange={(event) => setSimilarityOptions({ ...options, smallMatchThreshold: event.target.value })} /></label>
+                  <button type="submit" data-testid="recalculate" disabled={recalculating}>{recalculating ? 'Recalculating…' : 'Recalculate'}</button>
+                  {recalcMessage && <p className="notice" role="status" data-testid="recalc-message">{recalcMessage}</p>}
+                </form>
+              )}
             </>
           ) : <p>Report not ready.</p>}
         </div>
@@ -526,13 +612,56 @@ function Review() {
   )
 }
 
-function renderPieces(text: string, annotations: Annotation[]): Array<{ text: string; mark: string | null; comment: string | null }> {
+const MARK_CLASSES: Record<string, string> = {
+  HIGHLIGHT: 'highlight',
+  UNDERLINE: 'underline',
+  'match-exact': 'match-exact',
+  'match-near': 'match-near',
+  excluded: 'excluded',
+}
+
+const EXCLUSION_LABELS: Record<string, string> = {
+  QUOTE: 'Excluded quotation',
+  BIBLIOGRAPHY: 'Excluded bibliography',
+  SMALL_MATCH: 'Excluded small match',
+  MANUAL: 'Excluded by the teacher',
+}
+
+// Exclusions win over matches; overlapping matches from different sources are clipped, not dropped.
+function renderSimilarityPieces(text: string, report: SimilarityReportView | null): Piece[] {
+  if (!text) return []
+  const marks: Array<{ mark: string; comment: string } | null> = new Array(text.length).fill(null)
+  const paint = (start: number, end: number, mark: string, comment: string, overwrite: boolean) => {
+    const from = Math.max(0, Math.min(text.length, start))
+    const to = Math.max(from, Math.min(text.length, end))
+    for (let i = from; i < to; i += 1) if (overwrite || !marks[i]) marks[i] = { mark, comment }
+  }
+  for (const source of report?.sources ?? []) {
+    for (const passage of source.passages) {
+      paint(passage.startPosition, passage.endPosition, passage.matchType === 'NEAR_MATCH' ? 'match-near' : 'match-exact', `${passage.matchType === 'NEAR_MATCH' ? 'Near match' : 'Exact match'}: ${source.sourceName}`, false)
+    }
+  }
+  for (const region of report?.excludedMatches ?? []) {
+    if (region.startPosition === null || region.endPosition === null) continue
+    paint(region.startPosition, region.endPosition, 'excluded', EXCLUSION_LABELS[region.reason] ?? 'Excluded', true)
+  }
+  const pieces: Piece[] = []
+  let start = 0
+  for (let i = 1; i <= text.length; i += 1) {
+    if (i < text.length && marks[i]?.mark === marks[start]?.mark && marks[i]?.comment === marks[start]?.comment) continue
+    pieces.push({ text: text.slice(start, i), mark: marks[start]?.mark ?? null, comment: marks[start]?.comment ?? null })
+    start = i
+  }
+  return pieces
+}
+
+function renderPieces(text: string, annotations: Annotation[]): Piece[] {
   const ranges = annotations
     .map((annotation) => annotation.anchor && annotation.anchor.kind === 'text' ? { ...(annotation.anchor as TextAnchor), type: annotation.type, comment: annotation.content } : null)
     .filter((range): range is TextAnchor & { type: string; comment: string | null } => Boolean(range))
     .sort((a, b) => a.start - b.start)
   if (!text) return []
-  const pieces: Array<{ text: string; mark: string | null; comment: string | null }> = []
+  const pieces: Piece[] = []
   let cursor = 0
   for (const range of ranges) {
     const start = Math.max(0, Math.min(text.length, range.start))

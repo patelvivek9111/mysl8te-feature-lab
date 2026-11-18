@@ -13,7 +13,7 @@ import { FailureLimiter, clientAddressKey } from './services/rateLimit';
 import { canReadSubmission, loadSubmission, studentView, studiesCourse, teachesCourse } from './services/access';
 import { assertMagic, EXTENSION_TO_FORMAT, formatSupport, uploadDir } from './services/extract';
 import { buildSimilarityReport } from './services/similarity';
-import { REVIEW_DECISIONS } from './services/aiAssessment';
+import { REVIEW_DECISIONS, refreshAfterSimilarity } from './services/aiAssessment';
 import { renderFeedbackPdf } from './services/pdfExport';
 import { AnnotationType } from '@prisma/client';
 
@@ -649,14 +649,37 @@ export function createApp() {
         res.status(403).json({ error: 'Only the teacher can recalculate similarity' });
         return;
       }
-      await buildSimilarityReport(submission.id, {
-        excludeQuotes: Boolean(req.body.excludeQuotes ?? true),
-        excludeBibliography: Boolean(req.body.excludeBibliography ?? true),
-        excludeSmallMatches: Boolean(req.body.excludeSmallMatches ?? true),
-        smallMatchThreshold: Number(req.body.smallMatchThreshold ?? 8),
+      const body = req.body ?? {};
+      const flags = ['excludeQuotes', 'excludeBibliography', 'excludeSmallMatches'] as const;
+      const badFlag = flags.find((flag) => body[flag] !== undefined && typeof body[flag] !== 'boolean');
+      if (badFlag) {
+        res.status(400).json({ error: `${badFlag} must be true or false` });
+        return;
+      }
+      const threshold = body.smallMatchThreshold ?? 8;
+      if (!Number.isInteger(threshold) || threshold < 1 || threshold > 200) {
+        res.status(400).json({ error: 'smallMatchThreshold must be a whole number from 1 to 200' });
+        return;
+      }
+      const similarity = await buildSimilarityReport(submission.id, {
+        excludeQuotes: body.excludeQuotes ?? true,
+        excludeBibliography: body.excludeBibliography ?? true,
+        excludeSmallMatches: body.excludeSmallMatches ?? true,
+        smallMatchThreshold: threshold,
       });
-      const report = await prisma.similarityReport.findUnique({ where: { submissionId: submission.id }, include: { sources: { include: { passages: true } } } });
-      res.json({ report, disclosure: 'Similarity is an overlap percentage against the lab corpus and other submissions in this assignment. It is not proof of plagiarism and it is not a Turnitin score.' });
+      const aiAssessmentRefreshed = await refreshAfterSimilarity(submission.id, submission.document.textContent ?? '', similarity);
+      const report = await prisma.similarityReport.findUnique({
+        where: { submissionId: submission.id },
+        include: {
+          sources: { include: { passages: { orderBy: { startPosition: 'asc' } } }, orderBy: { similarityPercentage: 'desc' } },
+          excludedMatches: true,
+        },
+      });
+      await audit(req.user!.id, 'similarity_recalculate', 'submission', submission.id, {
+        excludeQuotes: report?.excludeQuotes, excludeBibliography: report?.excludeBibliography,
+        excludeSmallMatches: report?.excludeSmallMatches, smallMatchThreshold: report?.smallMatchThreshold, aiAssessmentRefreshed,
+      });
+      res.json({ report, aiAssessmentRefreshed, disclosure: 'Similarity is an overlap percentage against the lab corpus and other submissions in this assignment. It is not proof of plagiarism and it is not a Turnitin score.' });
     } catch (error) {
       next(error);
     }

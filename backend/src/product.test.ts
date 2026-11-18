@@ -8,7 +8,7 @@ import path from 'path';
 import { createApp } from './app';
 import { seedDemo, DEMO_ACCOUNTS } from './seed';
 import { processNextJob } from './worker';
-import { refreshStaleAnalyses } from './services/aiAssessment';
+import { backfillExcludedOffsets, refreshStaleAnalyses } from './services/aiAssessment';
 import { hashPassword } from './services/auth';
 import prisma from './db/prisma';
 import type { Server } from 'http';
@@ -220,6 +220,19 @@ test('similarity passages are character spans of the submission, and bibliograph
     assert.ok(passage.sourceText.length > 0);
   }
   assert.equal(similarityReport.excludedMatches.some((item: { reason: string; text: string }) => item.reason === 'BIBLIOGRAPHY' && /Austen, Jane/.test(item.text)), true);
+  for (const item of similarityReport.excludedMatches as Array<{ text: string; startPosition: number; endPosition: number }>) {
+    assert.ok(Number.isInteger(item.startPosition) && item.endPosition > item.startPosition);
+    assert.equal(document.textContent.slice(item.startPosition, item.endPosition).slice(0, 2000), item.text);
+  }
+  const reportId = (await prisma.similarityReport.findUniqueOrThrow({ where: { submissionId } })).id;
+  await prisma.excludedMatch.updateMany({ where: { reportId }, data: { startPosition: null, endPosition: null } });
+  assert.ok((await backfillExcludedOffsets()) >= 1);
+  const backfilled = await prisma.excludedMatch.findMany({ where: { report: { submissionId } } });
+  assert.ok(backfilled.length > 0 && backfilled.every((item) => item.startPosition !== null && item.endPosition !== null));
+  for (const bad of [{ excludeQuotes: 'false' }, { smallMatchThreshold: 0 }, { smallMatchThreshold: 2.5 }, { smallMatchThreshold: '8' }]) {
+    const refused = await json(`/api/submissions/${submissionId}/similarity/recalculate`, teacher, { method: 'POST', body: JSON.stringify(bad) });
+    assert.equal(refused.status, 400, JSON.stringify(bad));
+  }
 
   const recalculated = await json(`/api/submissions/${submissionId}/similarity/recalculate`, teacher, {
     method: 'POST',
@@ -230,6 +243,41 @@ test('similarity passages are character spans of the submission, and bibliograph
   assert.ok(recalculated.body.report.overallSimilarity >= similarityReport.overallSimilarity);
   const restored = await json(`/api/submissions/${submissionId}/similarity/recalculate`, teacher, { method: 'POST', body: '{}' });
   assert.equal(restored.body.report.excludeBibliography, true);
+});
+
+test('recalculating similarity refreshes the paraphrase context and keeps superseded reviews', async () => {
+  const teacher = await login(DEMO_ACCOUNTS.teacher.email, DEMO_ACCOUNTS.teacher.password);
+  const courses = await json('/api/courses', teacher);
+  const course = await json(`/api/courses/${courses.body.courses[0].id}`, teacher);
+  const assignment = course.body.course.assignments.find((item: { title: string }) => item.title === 'Opening paragraph close reading');
+  const submissionId = assignment.submissions[0].id as string;
+  const recalc = (body: object) => json(`/api/submissions/${submissionId}/similarity/recalculate`, teacher, { method: 'POST', body: JSON.stringify(body) });
+  const review = (note: string) => json(`/api/submissions/${submissionId}/ai-assessment/review`, teacher, { method: 'POST', body: JSON.stringify({ decision: 'DISCUSS_WITH_STUDENT', note }) });
+  const assessment = async () => (await json(`/api/submissions/${submissionId}`, teacher)).body.submission.aiAssessment;
+
+  try {
+    assert.equal((await recalc({})).status, 200);
+    const keptNote = `Review that survives an unchanged recalculation ${Date.now()}`;
+    assert.equal((await review(keptNote)).status, 200);
+    const unchanged = await recalc({});
+    assert.equal(unchanged.body.aiAssessmentRefreshed, false);
+    assert.equal((await assessment()).reviewNote, keptNote);
+
+    const before = (await assessment()).features.paraphraseSignal;
+    const changed = await recalc({ smallMatchThreshold: 200 });
+    assert.equal(changed.status, 200);
+    assert.equal(changed.body.aiAssessmentRefreshed, true);
+    const after = await assessment();
+    assert.notDeepEqual(after.features.paraphraseSignal, before);
+    assert.equal(after.reviewDecision, null);
+    const history = await prisma.auditLog.findMany({ where: { entityId: submissionId, action: 'ai_review_superseded' } });
+    const superseded = history.map((row) => row.changes as { note?: string; reason?: string } | null).find((changes) => changes?.note === keptNote);
+    assert.equal(superseded?.reason, 'similarity_recalculated');
+    const recalcLog = await prisma.auditLog.findFirst({ where: { entityId: submissionId, action: 'similarity_recalculate' }, orderBy: { createdAt: 'desc' } });
+    assert.equal((recalcLog?.changes as { smallMatchThreshold?: number } | null)?.smallMatchThreshold, 200);
+  } finally {
+    await recalc({});
+  }
 });
 
 test('AI-writing review requires the course teacher, a known decision, and a note', async () => {
@@ -322,6 +370,12 @@ test('teachers outside the course and admins cannot review, and superseded revie
   assert.equal((await json(path, outsider, { method: 'POST', body })).status, 403);
   assert.equal((await json(path, admin, { method: 'POST', body })).status, 403);
   assert.equal((await json(`/api/submissions/${submissionId}`, outsider)).status, 403);
+  // ADR-011: admins have read-only oversight of signals and reviews but cannot record decisions or change analyses.
+  const adminView = await json(`/api/submissions/${submissionId}`, admin);
+  assert.equal(adminView.status, 200);
+  assert.equal(adminView.body.submission.aiAssessment.consequentialUseEnabled, false);
+  assert.equal((await json(`/api/submissions/${submissionId}/similarity/recalculate`, admin, { method: 'POST', body: '{}' })).status, 403);
+  assert.equal((await json(`/api/submissions/${submissionId}/similarity/recalculate`, outsider, { method: 'POST', body: '{}' })).status, 403);
 
   const note = `Reviewed before a model change ${Date.now()}`;
   assert.equal((await json(path, teacher, { method: 'POST', body: JSON.stringify({ decision: 'DISCUSS_WITH_STUDENT', note }) })).status, 200);

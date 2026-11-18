@@ -110,6 +110,8 @@ export async function buildSimilarityReport(submissionId: string, options?: Part
           create: result.excludedRegions.map((region) => ({
             text: text.slice(region.start, region.end).slice(0, 2000),
             reason: region.reason,
+            startPosition: region.start,
+            endPosition: region.end,
           })),
         },
       },
