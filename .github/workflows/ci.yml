@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, cursor/academic-review-lab-ba77]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -37,9 +37,9 @@ jobs:
           --health-retries 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload Playwright report and videos
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-results
           path: |

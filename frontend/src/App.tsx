@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, apiBlob, getToken, setToken, signOut, SESSION_EXPIRED_EVENT, type AuthUser } from './api'
 import { AiReviewCard, type AiAssessment } from './AiReviewCard'
@@ -360,7 +360,7 @@ function Review() {
   const [rubricScores, setRubricScores] = useState<Record<string, number>>({})
   const [comment, setComment] = useState('Look at how certain the families sound.')
   const [error, setError] = useState('')
-  const [mediaUrl, setMediaUrl] = useState<string | null>(null)
+  const [media, setMedia] = useState<{ documentId: string; url: string } | null>(null)
   const [layer, setLayer] = useState<'annotations' | 'similarity'>('annotations')
   const [editedOptions, setEditedOptions] = useState<{ submissionId: string; value: SimilarityOptionsForm } | null>(null)
   const [recalculating, setRecalculating] = useState(false)
@@ -369,7 +369,7 @@ function Review() {
   const setSimilarityOptions = (value: SimilarityOptionsForm | null) => setEditedOptions(value ? { submissionId, value } : null)
   const recalcMessage = recalcNotice?.submissionId === submissionId ? recalcNotice.text : ''
 
-  async function reload() {
+  const reload = useCallback(async () => {
     const next = await api<ReviewData>(`/api/submissions/${submissionId}`)
     setData(next)
     if (!gradeDirty.current) {
@@ -377,35 +377,43 @@ function Review() {
       setFeedback(next.submission.grade?.feedback ?? '')
       setRubricScores(next.submission.grade?.rubricScores ?? {})
     }
-  }
+  }, [submissionId])
 
   useEffect(() => {
     gradeDirty.current = false
-  }, [submissionId])
-
-  useEffect(() => {
     let stop = false
-    reload().catch((err: Error) => setError(err.message))
-    const timer = window.setInterval(() => {
-      if (!stop) reload().catch(() => undefined)
-    }, 1500)
-    return () => { stop = true; window.clearInterval(timer) }
-  }, [submissionId])
+    const poll = (report: (err: Error) => void) => {
+      if (!stop) reload().catch(report)
+    }
+    const first = window.setTimeout(() => poll((err) => setError(err.message)), 0)
+    const timer = window.setInterval(() => poll(() => undefined), 1500)
+    return () => { stop = true; window.clearTimeout(first); window.clearInterval(timer) }
+  }, [reload])
+
+  const previewKind = data?.submission.document.metadata?.previewKind
+  const pageDrawable = (data?.markablePages ?? 0) > 0 && data?.submission.document.processingStatus === 'COMPLETED'
+  const mediaDocumentId = data && (previewKind === 'pdf' || (!pageDrawable && (previewKind === 'image' || previewKind === 'audio' || previewKind === 'video')))
+    ? data.submission.document.id
+    : null
+  const mediaUrl = media?.documentId === mediaDocumentId ? media.url : null
 
   useEffect(() => {
-    const preview = data?.submission.document.metadata?.previewKind
-    const drawable = (data?.markablePages ?? 0) > 0 && data?.submission.document.processingStatus === 'COMPLETED'
-    if (!data || (drawable && preview !== 'pdf') || (preview !== 'pdf' && preview !== 'image' && preview !== 'audio' && preview !== 'video')) {
-      setMediaUrl(null)
-      return
-    }
+    if (!mediaDocumentId) return
     let url = ''
-    apiBlob(`/api/documents/${data.submission.document.id}/file`).then((blob) => {
+    let cancelled = false
+    apiBlob(`/api/documents/${mediaDocumentId}/file`).then((blob) => {
+      if (cancelled) return
       url = URL.createObjectURL(blob)
-      setMediaUrl(url)
-    }).catch(() => setMediaUrl(null))
-    return () => { if (url) URL.revokeObjectURL(url) }
-  }, [data?.submission.document.id, data?.submission.document.metadata?.previewKind, data?.markablePages, data?.submission.document.processingStatus])
+      setMedia({ documentId: mediaDocumentId, url })
+    }).catch(() => undefined)
+    return () => {
+      cancelled = true
+      if (url) {
+        URL.revokeObjectURL(url)
+        setMedia((current) => current?.url === url ? null : current)
+      }
+    }
+  }, [mediaDocumentId])
 
   const text = data?.submission.document.textContent ?? ''
   const showSimilarity = layer === 'similarity' && Boolean(data?.submission.similarityReport)
