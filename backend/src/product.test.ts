@@ -287,7 +287,13 @@ test('recalculating similarity refreshes the paraphrase context and keeps supers
     await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM ai_assessments WHERE submission_id = ${submissionId} FOR UPDATE`;
       blockedReview = review(`Review racing a rebuild ${Date.now()}`);
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      for (let waited = 0; ; waited += 25) {
+        const waiting = await prisma.$queryRaw<Array<{ n: number }>>`
+          SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%ai_assessments%'`;
+        if (waiting[0].n > 0) break;
+        assert.ok(waited < 4000, 'the review request never blocked on the row lock');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       await tx.aiAssessment.update({ where: { submissionId }, data: { reviewDecision: null } });
     });
     assert.equal((await blockedReview!).status, 409);

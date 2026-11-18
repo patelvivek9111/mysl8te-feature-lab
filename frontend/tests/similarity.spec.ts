@@ -24,8 +24,8 @@ test('teacher sees matches and exclusions in the document and recalculates with 
   await expect(exact.first()).toHaveAttribute('title', /Exact match: Pride and Prejudice/);
   const bibliography = page.locator('[data-testid="document-text"] mark.excluded[title="Excluded bibliography"]');
   await expect(bibliography).toContainText('Austen, Jane');
-  await expect(bibliography).toHaveAttribute('aria-label', /^Excluded bibliography\. /);
-  await expect(bibliography).toHaveAttribute('tabindex', '0');
+  await expect(bibliography.locator('.sr-only')).toHaveText('Excluded bibliography: ');
+  await expect(exact.first().locator('.sr-only')).toHaveText(/^Exact match: Pride and Prejudice/);
   await expect(page.getByTestId('highlight')).toBeDisabled();
 
   try {

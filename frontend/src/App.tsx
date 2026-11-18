@@ -407,6 +407,7 @@ function Review() {
   }
 
   function rememberSelection() {
+    if (showSimilarity) return
     pendingAnchor.current = selectionAnchor(textRef.current, text)
   }
 
@@ -492,7 +493,7 @@ function Review() {
         )}
         {showSimilarity && (
           <p className="note legend" data-testid="similarity-legend">
-            <mark className="match-exact">Exact match</mark> <mark className="match-near">Near match</mark> <mark className="excluded">Excluded from matching</mark> Hover or focus a marked span to hear its source or exclusion reason.
+            <mark className="match-exact">Exact match</mark> <mark className="match-near">Near match</mark> <mark className="excluded">Excluded from matching</mark> Hover a marked span to see its source or exclusion reason; screen readers announce it before the span.
           </p>
         )}
         <div ref={textRef} className="document" data-testid="document-text" onMouseUp={rememberSelection}>
@@ -502,8 +503,7 @@ function Review() {
                 className={MARK_CLASSES[piece.mark] ?? 'highlight'}
                 data-mark={piece.mark}
                 title={piece.comment || undefined}
-                {...(showSimilarity && piece.comment ? { tabIndex: 0, 'aria-label': `${piece.comment}. ${piece.text.length > 200 ? `${piece.text.slice(0, 200)}…` : piece.text}` } : {})}
-              >{piece.text}</mark>
+              >{showSimilarity && piece.comment && <span className="sr-only">{`${piece.comment}: `}</span>}{piece.text}</mark>
             : <span key={index}>{piece.text}</span>)}
           {!text && <p>No extracted text for this file.</p>}
         </div>
