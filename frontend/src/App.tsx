@@ -353,6 +353,7 @@ function Review() {
   const user = useUser()
   const textRef = useRef<HTMLDivElement>(null)
   const gradeDirty = useRef(false)
+  const activeSubmission = useRef(submissionId)
   const pendingAnchor = useRef<TextAnchor | null>(null)
   const [data, setData] = useState<ReviewData | null>(null)
   const [score, setScore] = useState('')
@@ -371,6 +372,7 @@ function Review() {
 
   const reload = useCallback(async () => {
     const next = await api<ReviewData>(`/api/submissions/${submissionId}`)
+    if (activeSubmission.current !== submissionId) return
     setData(next)
     if (!gradeDirty.current) {
       setScore(next.submission.grade ? String(next.submission.grade.score) : '')
@@ -380,6 +382,7 @@ function Review() {
   }, [submissionId])
 
   useEffect(() => {
+    activeSubmission.current = submissionId
     gradeDirty.current = false
     let stop = false
     const poll = (report: (err: Error) => void) => {
@@ -388,7 +391,7 @@ function Review() {
     const first = window.setTimeout(() => poll((err) => setError(err.message)), 0)
     const timer = window.setInterval(() => poll(() => undefined), 1500)
     return () => { stop = true; window.clearTimeout(first); window.clearInterval(timer) }
-  }, [reload])
+  }, [reload, submissionId])
 
   const previewKind = data?.submission.document.metadata?.previewKind
   const pageDrawable = (data?.markablePages ?? 0) > 0 && data?.submission.document.processingStatus === 'COMPLETED'
@@ -401,13 +404,20 @@ function Review() {
     if (!mediaDocumentId) return
     let url = ''
     let cancelled = false
-    apiBlob(`/api/documents/${mediaDocumentId}/file`).then((blob) => {
-      if (cancelled) return
-      url = URL.createObjectURL(blob)
-      setMedia({ documentId: mediaDocumentId, url })
-    }).catch(() => undefined)
+    let retry = 0
+    const load = (attempt: number) => {
+      apiBlob(`/api/documents/${mediaDocumentId}/file`).then((blob) => {
+        if (cancelled) return
+        url = URL.createObjectURL(blob)
+        setMedia({ documentId: mediaDocumentId, url })
+      }).catch(() => {
+        if (!cancelled && attempt < 3) retry = window.setTimeout(() => load(attempt + 1), 2000)
+      })
+    }
+    load(1)
     return () => {
       cancelled = true
+      window.clearTimeout(retry)
       if (url) {
         URL.revokeObjectURL(url)
         setMedia((current) => current?.url === url ? null : current)

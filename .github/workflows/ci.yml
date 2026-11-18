@@ -11,11 +11,10 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DATABASE_URL: postgresql://lab:lab@localhost:5432/mysl8te_feature_lab?schema=public
-  NODE_ENV: development
 
 jobs:
   test:
@@ -64,10 +63,14 @@ jobs:
 
       - name: Backend unit tests
         working-directory: backend
+        env:
+          NODE_ENV: development
         run: npm run test:unit
 
       - name: Backend integration tests
         working-directory: backend
+        env:
+          NODE_ENV: development
         run: npm run test:integration
 
       - name: Frontend lint
@@ -86,6 +89,7 @@ jobs:
         working-directory: frontend
         env:
           CI: "true"
+          NODE_ENV: development
         run: npx playwright test
 
       - name: Upload Playwright report and videos
@@ -97,4 +101,4 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 14
-          if-no-files-found: ignore
+          if-no-files-found: warn
