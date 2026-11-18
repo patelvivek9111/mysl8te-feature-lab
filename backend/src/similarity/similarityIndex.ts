@@ -1,4 +1,4 @@
-import { findBibliographyRegion, findQuoteRegions } from './exclusions';
+import { findExcludedRegions } from './exclusions';
 import { hashKgram, hashWord, tokenize } from './tokenize';
 import type {
   CorpusDocument,
@@ -185,13 +185,7 @@ export class SimilarityIndex {
     const hashes = new Uint32Array(n);
     for (let i = 0; i < n; i++) hashes[i] = hashWord(norms[i]);
 
-    const excludedRegions: ExcludedRegion[] = [];
-    if (excludeQuotes) excludedRegions.push(...findQuoteRegions(text));
-    if (excludeBibliography) {
-      const bib = findBibliographyRegion(text);
-      if (bib) excludedRegions.push(bib);
-    }
-    excludedRegions.sort((a, b) => a.start - b.start || a.end - b.end);
+    const excludedRegions: ExcludedRegion[] = findExcludedRegions(text, { excludeQuotes, excludeBibliography });
     const excluded = markExcluded(tokens, excludedRegions);
 
     const raw = this.findPassages(tokens, norms, hashes, excluded, k, excludedIds);

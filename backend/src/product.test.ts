@@ -8,7 +8,8 @@ import path from 'path';
 import { createApp } from './app';
 import { seedDemo, DEMO_ACCOUNTS } from './seed';
 import { processNextJob } from './worker';
-import { backfillExcludedOffsets, refreshStaleAnalyses } from './services/aiAssessment';
+import { refreshStaleAnalyses } from './services/aiAssessment';
+import { backfillExcludedOffsets } from './services/similarity';
 import { hashPassword } from './services/auth';
 import prisma from './db/prisma';
 import type { Server } from 'http';
@@ -224,12 +225,17 @@ test('similarity passages are character spans of the submission, and bibliograph
     assert.ok(Number.isInteger(item.startPosition) && item.endPosition > item.startPosition);
     assert.equal(document.textContent.slice(item.startPosition, item.endPosition).slice(0, 2000), item.text);
   }
-  const reportId = (await prisma.similarityReport.findUniqueOrThrow({ where: { submissionId } })).id;
-  await prisma.excludedMatch.updateMany({ where: { reportId }, data: { startPosition: null, endPosition: null } });
+  const reportBefore = await prisma.similarityReport.findUniqueOrThrow({ where: { submissionId }, include: { excludedMatches: true } });
+  const assessmentBefore = await prisma.aiAssessment.findUniqueOrThrow({ where: { submissionId } });
+  await prisma.excludedMatch.updateMany({ where: { reportId: reportBefore.id }, data: { startPosition: null, endPosition: null } });
   assert.ok((await backfillExcludedOffsets()) >= 1);
-  const backfilled = await prisma.excludedMatch.findMany({ where: { report: { submissionId } } });
-  assert.ok(backfilled.length > 0 && backfilled.every((item) => item.startPosition !== null && item.endPosition !== null));
-  for (const bad of [{ excludeQuotes: 'false' }, { smallMatchThreshold: 0 }, { smallMatchThreshold: 2.5 }, { smallMatchThreshold: '8' }]) {
+  const reportAfter = await prisma.similarityReport.findUniqueOrThrow({ where: { submissionId }, include: { excludedMatches: true } });
+  assert.equal(reportAfter.id, reportBefore.id, 'backfill keeps the report and its matches');
+  assert.equal(reportAfter.overallSimilarity, reportBefore.overallSimilarity);
+  const offsets = (rows: Array<{ reason: string; startPosition: number | null; endPosition: number | null }>) => rows.map((row) => `${row.reason}:${row.startPosition}-${row.endPosition}`).sort();
+  assert.deepEqual(offsets(reportAfter.excludedMatches), offsets(reportBefore.excludedMatches));
+  assert.equal((await prisma.aiAssessment.findUniqueOrThrow({ where: { submissionId } })).updatedAt.getTime(), assessmentBefore.updatedAt.getTime());
+  for (const bad of [{ excludeQuotes: 'false' }, { smallMatchThreshold: 0 }, { smallMatchThreshold: 2.5 }, { smallMatchThreshold: '8' }, { smallMatchThreshold: null }]) {
     const refused = await json(`/api/submissions/${submissionId}/similarity/recalculate`, teacher, { method: 'POST', body: JSON.stringify(bad) });
     assert.equal(refused.status, 400, JSON.stringify(bad));
   }
@@ -275,6 +281,17 @@ test('recalculating similarity refreshes the paraphrase context and keeps supers
     assert.equal(superseded?.reason, 'similarity_recalculated');
     const recalcLog = await prisma.auditLog.findFirst({ where: { entityId: submissionId, action: 'similarity_recalculate' }, orderBy: { createdAt: 'desc' } });
     assert.equal((recalcLog?.changes as { smallMatchThreshold?: number } | null)?.smallMatchThreshold, 200);
+
+    // A review submitted while a rebuild holds the row lock must fail its version check, not be overwritten.
+    let blockedReview: Promise<{ status: number }> | undefined;
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM ai_assessments WHERE submission_id = ${submissionId} FOR UPDATE`;
+      blockedReview = review(`Review racing a rebuild ${Date.now()}`);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await tx.aiAssessment.update({ where: { submissionId }, data: { reviewDecision: null } });
+    });
+    assert.equal((await blockedReview!).status, 409);
+    assert.equal((await assessment()).reviewDecision, null);
   } finally {
     await recalc({});
   }

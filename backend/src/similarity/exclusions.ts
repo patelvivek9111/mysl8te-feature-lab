@@ -39,3 +39,14 @@ export function findBibliographyRegion(text: string): ExcludedRegion | null {
   if (!last) return null;
   return { start: last.index, end: text.length, reason: 'BIBLIOGRAPHY' };
 }
+
+/** Every region excluded from matching for these options, sorted by position. Depends only on the text. */
+export function findExcludedRegions(text: string, options: { excludeQuotes?: boolean; excludeBibliography?: boolean } = {}): ExcludedRegion[] {
+  const regions: ExcludedRegion[] = [];
+  if (options.excludeQuotes ?? true) regions.push(...findQuoteRegions(text));
+  if (options.excludeBibliography ?? true) {
+    const bib = findBibliographyRegion(text);
+    if (bib) regions.push(bib);
+  }
+  return regions.sort((a, b) => a.start - b.start || a.end - b.end);
+}

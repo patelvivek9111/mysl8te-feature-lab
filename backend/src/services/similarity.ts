@@ -1,5 +1,6 @@
+import type { Prisma } from '@prisma/client';
 import prisma from '../db/prisma';
-import { analyzeSimilarity, type CorpusDocument, type SimilarityResult } from '../similarity';
+import { analyzeSimilarity, findExcludedRegions, type CorpusDocument, type ExcludedRegion, type SimilarityResult } from '../similarity';
 
 export interface SimilarityOptions {
   excludeQuotes: boolean;
@@ -60,6 +61,53 @@ export function runSimilarity(text: string, corpus: CorpusDocument[], options: S
   });
 }
 
+// Serializes rebuilds of one submission's report (teacher recalculation, worker, boot backfill).
+async function lockReport(tx: Prisma.TransactionClient, submissionId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`similarity:${submissionId}`}))`;
+}
+
+function excludedRows(text: string, regions: ExcludedRegion[]) {
+  return regions.map((region) => ({
+    text: text.slice(region.start, region.end).slice(0, 2000),
+    reason: region.reason,
+    startPosition: region.start,
+    endPosition: region.end,
+  }));
+}
+
+// Reports written before offsets were stored get their excluded rows recomputed from the text and
+// the report's own options. Matches, scores, and AI assessments are left untouched.
+export async function backfillExcludedOffsets(batchSize = 100): Promise<number> {
+  let fixed = 0;
+  let cursor: string | undefined;
+  for (;;) {
+    const batch = await prisma.similarityReport.findMany({
+      where: { excludedMatches: { some: { startPosition: null } }, ...(cursor ? { id: { gt: cursor } } : {}) },
+      orderBy: { id: 'asc' },
+      take: batchSize,
+      select: { id: true, submissionId: true },
+    });
+    if (batch.length === 0) return fixed;
+    cursor = batch[batch.length - 1].id;
+    for (const { submissionId } of batch) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          await lockReport(tx, submissionId);
+          const report = await tx.similarityReport.findUnique({ where: { submissionId }, include: { submission: { include: { document: true } } } });
+          if (!report) return;
+          const text = report.submission.document.textContent ?? '';
+          const regions = findExcludedRegions(text, { excludeQuotes: report.excludeQuotes, excludeBibliography: report.excludeBibliography });
+          await tx.excludedMatch.deleteMany({ where: { reportId: report.id } });
+          await tx.excludedMatch.createMany({ data: excludedRows(text, regions).map((row) => ({ ...row, reportId: report.id })) });
+        });
+        fixed += 1;
+      } catch (error) {
+        console.error(JSON.stringify({ level: 'error', message: 'excluded offset backfill failed', submissionId, error: String(error) }));
+      }
+    }
+  }
+}
+
 export async function buildSimilarityReport(submissionId: string, options?: Partial<SimilarityOptions>): Promise<SimilarityResult | null> {
   const submission = await prisma.submission.findUnique({
     where: { id: submissionId },
@@ -73,6 +121,7 @@ export async function buildSimilarityReport(submissionId: string, options?: Part
   const sourceTexts = new Map(corpus.map((doc) => [doc.id, doc.text]));
 
   await prisma.$transaction(async (tx) => {
+    await lockReport(tx, submissionId);
     const existing = await tx.similarityReport.findUnique({ where: { submissionId } });
     if (existing) {
       await tx.similarityPassage.deleteMany({ where: { source: { reportId: existing.id } } });
@@ -106,14 +155,7 @@ export async function buildSimilarityReport(submissionId: string, options?: Part
             },
           })),
         },
-        excludedMatches: {
-          create: result.excludedRegions.map((region) => ({
-            text: text.slice(region.start, region.end).slice(0, 2000),
-            reason: region.reason,
-            startPosition: region.start,
-            endPosition: region.end,
-          })),
-        },
+        excludedMatches: { create: excludedRows(text, result.excludedRegions) },
       },
     });
   });

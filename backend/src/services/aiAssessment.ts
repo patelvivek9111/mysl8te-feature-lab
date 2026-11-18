@@ -87,26 +87,6 @@ export async function refreshStaleAnalyses(): Promise<number> {
   return refreshed;
 }
 
-// Reports written before excluded-region offsets were stored are rebuilt with their own options.
-export async function backfillExcludedOffsets(): Promise<number> {
-  const legacy = await prisma.similarityReport.findMany({
-    where: { excludedMatches: { some: { startPosition: null } } },
-    select: { submissionId: true, excludeQuotes: true, excludeBibliography: true, excludeSmallMatches: true, smallMatchThreshold: true },
-  });
-  let rebuilt = 0;
-  for (const { submissionId, ...options } of legacy) {
-    try {
-      const similarity = await buildSimilarityReport(submissionId, options);
-      const submission = await prisma.submission.findUnique({ where: { id: submissionId }, include: { document: true } });
-      await refreshAfterSimilarity(submissionId, submission?.document.textContent ?? '', similarity);
-      rebuilt += 1;
-    } catch (error) {
-      console.error(JSON.stringify({ level: 'error', message: 'excluded offset backfill failed', submissionId, error: String(error) }));
-    }
-  }
-  return rebuilt;
-}
-
 function sameJson(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
@@ -117,30 +97,45 @@ function sameJson(a: unknown, b: unknown): boolean {
   return keysA.every((key) => sameJson((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
 }
 
+type AssessmentFeatures = { paraphraseSignal?: unknown; modelVersion?: string } | null;
+type SupersedeReason = 'reprocessed' | 'model_version_changed' | 'similarity_recalculated';
+
 // Only the paraphrase signal depends on similarity. When recalculation leaves it unchanged the
 // stored assessment and its teacher review stay as they are; otherwise the assessment is rebuilt
 // and the earlier review is moved to the audit log.
 export async function refreshAfterSimilarity(submissionId: string, text: string, similarity: SimilarityResult | null): Promise<boolean> {
-  const existing = await prisma.aiAssessment.findUnique({ where: { submissionId } });
-  if (!existing || existing.status !== 'COMPLETED') return false;
-  const record = assessmentRecord(text, similarity);
-  const stored = existing.features as { paraphraseSignal?: unknown; modelVersion?: string } | null;
-  const next = record.features as { paraphraseSignal?: unknown; modelVersion?: string };
-  if (stored?.modelVersion === next.modelVersion && sameJson(stored?.paraphraseSignal, next.paraphraseSignal)) return false;
-  await storeAiAssessment(submissionId, text, similarity, 'similarity_recalculated');
-  return true;
+  return writeAssessment(submissionId, text, similarity, 'similarity_recalculated', true);
 }
 
 export async function storeAiAssessment(
   submissionId: string,
   text: string,
   similarity: SimilarityResult | null,
-  reason: 'reprocessed' | 'model_version_changed' | 'similarity_recalculated' = 'reprocessed',
+  reason: SupersedeReason = 'reprocessed',
 ): Promise<void> {
+  await writeAssessment(submissionId, text, similarity, reason, false);
+}
+
+async function writeAssessment(
+  submissionId: string,
+  text: string,
+  similarity: SimilarityResult | null,
+  reason: SupersedeReason,
+  onlyIfParaphraseChanged: boolean,
+): Promise<boolean> {
   const record = assessmentRecord(text, similarity);
   const reviewReset = { reviewDecision: null, reviewNote: null, reviewedById: null, reviewedAt: null };
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
+    // The row lock makes a concurrent review either land first (and get audited below) or fail its
+    // updatedAt check afterwards, so a review is never overwritten silently.
+    await tx.$queryRaw`SELECT id FROM ai_assessments WHERE submission_id = ${submissionId} FOR UPDATE`;
     const previous = await tx.aiAssessment.findUnique({ where: { submissionId } });
+    if (onlyIfParaphraseChanged) {
+      if (!previous || previous.status !== 'COMPLETED') return false;
+      const stored = previous.features as AssessmentFeatures;
+      const next = record.features as AssessmentFeatures;
+      if (stored?.modelVersion === next?.modelVersion && sameJson(stored?.paraphraseSignal, next?.paraphraseSignal)) return false;
+    }
     if (previous?.reviewDecision) {
       await tx.auditLog.create({
         data: {
@@ -153,7 +148,7 @@ export async function storeAiAssessment(
             decision: previous.reviewDecision,
             note: previous.reviewNote,
             reviewedAt: previous.reviewedAt?.toISOString() ?? null,
-            modelVersion: (previous.features as { modelVersion?: string } | null)?.modelVersion ?? null,
+            modelVersion: (previous.features as AssessmentFeatures)?.modelVersion ?? null,
           },
         },
       });
@@ -163,5 +158,6 @@ export async function storeAiAssessment(
       update: { ...record, ...reviewReset },
       create: { submissionId, ...record },
     });
+    return true;
   });
 }

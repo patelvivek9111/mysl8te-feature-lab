@@ -13,6 +13,7 @@ export type {
   Token,
 } from './types';
 export { tokenize } from './tokenize';
+export { findExcludedRegions } from './exclusions';
 export { SimilarityIndex, ALGORITHM_NAME, ALGORITHM_VERSION } from './similarityIndex';
 
 /**

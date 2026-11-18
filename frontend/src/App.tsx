@@ -360,9 +360,10 @@ function Review() {
   }, [data?.submission.document.id, data?.submission.document.metadata?.previewKind])
 
   const text = data?.submission.document.textContent ?? ''
+  const showSimilarity = layer === 'similarity' && Boolean(data?.submission.similarityReport)
   const pieces = useMemo(
-    () => layer === 'similarity' ? renderSimilarityPieces(text, data?.submission.similarityReport ?? null) : renderPieces(text, data?.submission.annotations ?? []),
-    [text, data, layer],
+    () => showSimilarity ? renderSimilarityPieces(text, data?.submission.similarityReport ?? null) : renderPieces(text, data?.submission.annotations ?? []),
+    [text, data, showSimilarity],
   )
   if (!data) return <p>Loading submission…</p>
   const submission = data.submission
@@ -471,10 +472,11 @@ function Review() {
           <>
             <label>Annotation comment<input data-testid="annotation-comment" value={comment} onChange={(event) => setComment(event.target.value)} /></label>
             <div className="button-row">
-              <button data-testid="highlight" onClick={() => annotate('HIGHLIGHT')}>Highlight selection</button>
-              <button data-testid="underline" onClick={() => annotate('UNDERLINE')}>Underline selection</button>
-              <button onClick={() => annotate('POINT')}>Comment on selection</button>
+              <button data-testid="highlight" disabled={showSimilarity} onClick={() => annotate('HIGHLIGHT')}>Highlight selection</button>
+              <button data-testid="underline" disabled={showSimilarity} onClick={() => annotate('UNDERLINE')}>Underline selection</button>
+              <button disabled={showSimilarity} onClick={() => annotate('POINT')}>Comment on selection</button>
             </div>
+            {showSimilarity && <p className="note">Switch to the annotations layer to add highlights and comments.</p>}
           </>
         )}
         {mediaUrl && submission.document.metadata?.previewKind === 'pdf' && <iframe title="PDF preview" className="pdf-frame" src={mediaUrl} />}
@@ -484,18 +486,24 @@ function Review() {
         {text && (
           <fieldset className="layer-toggle">
             <legend>Show in document</legend>
-            <label><input type="radio" name="layer" data-testid="layer-annotations" checked={layer === 'annotations'} onChange={() => setLayer('annotations')} /> Annotations</label>
-            <label><input type="radio" name="layer" data-testid="layer-similarity" checked={layer === 'similarity'} onChange={() => setLayer('similarity')} disabled={!report} /> Similarity matches and exclusions</label>
+            <label><input type="radio" name="layer" data-testid="layer-annotations" checked={!showSimilarity} onChange={() => setLayer('annotations')} /> Annotations</label>
+            <label><input type="radio" name="layer" data-testid="layer-similarity" checked={showSimilarity} onChange={() => setLayer('similarity')} disabled={!report} /> Similarity matches and exclusions</label>
           </fieldset>
         )}
-        {layer === 'similarity' && report && (
+        {showSimilarity && (
           <p className="note legend" data-testid="similarity-legend">
-            <mark className="match-exact">Exact match</mark> <mark className="match-near">Near match</mark> <mark className="excluded">Excluded from matching</mark> Hover a span to see its source or exclusion reason.
+            <mark className="match-exact">Exact match</mark> <mark className="match-near">Near match</mark> <mark className="excluded">Excluded from matching</mark> Hover or focus a marked span to hear its source or exclusion reason.
           </p>
         )}
         <div ref={textRef} className="document" data-testid="document-text" onMouseUp={rememberSelection}>
           {pieces.map((piece, index) => piece.mark
-            ? <mark key={index} className={MARK_CLASSES[piece.mark] ?? 'highlight'} data-mark={piece.mark} title={piece.comment || undefined}>{piece.text}</mark>
+            ? <mark
+                key={index}
+                className={MARK_CLASSES[piece.mark] ?? 'highlight'}
+                data-mark={piece.mark}
+                title={piece.comment || undefined}
+                {...(showSimilarity && piece.comment ? { tabIndex: 0, 'aria-label': `${piece.comment}. ${piece.text.length > 200 ? `${piece.text.slice(0, 200)}…` : piece.text}` } : {})}
+              >{piece.text}</mark>
             : <span key={index}>{piece.text}</span>)}
           {!text && <p>No extracted text for this file.</p>}
         </div>
@@ -627,30 +635,36 @@ const EXCLUSION_LABELS: Record<string, string> = {
   MANUAL: 'Excluded by the teacher',
 }
 
-// Exclusions win over matches; overlapping matches from different sources are clipped, not dropped.
+// Exclusions win over matches; where matches from different sources overlap, the earlier-listed
+// (higher-percentage) source wins. Swept over interval boundaries so cost scales with spans, not text length.
 function renderSimilarityPieces(text: string, report: SimilarityReportView | null): Piece[] {
   if (!text) return []
-  const marks: Array<{ mark: string; comment: string } | null> = new Array(text.length).fill(null)
-  const paint = (start: number, end: number, mark: string, comment: string, overwrite: boolean) => {
-    const from = Math.max(0, Math.min(text.length, start))
-    const to = Math.max(from, Math.min(text.length, end))
-    for (let i = from; i < to; i += 1) if (overwrite || !marks[i]) marks[i] = { mark, comment }
-  }
+  const spans: Array<{ start: number; end: number; mark: string; comment: string; rank: number }> = []
+  const clamp = (value: number) => Math.max(0, Math.min(text.length, value))
+  let order = 0
   for (const source of report?.sources ?? []) {
     for (const passage of source.passages) {
-      paint(passage.startPosition, passage.endPosition, passage.matchType === 'NEAR_MATCH' ? 'match-near' : 'match-exact', `${passage.matchType === 'NEAR_MATCH' ? 'Near match' : 'Exact match'}: ${source.sourceName}`, false)
+      const near = passage.matchType === 'NEAR_MATCH'
+      spans.push({ start: clamp(passage.startPosition), end: clamp(passage.endPosition), mark: near ? 'match-near' : 'match-exact', comment: `${near ? 'Near match' : 'Exact match'}: ${source.sourceName}`, rank: 1_000_000 + order++ })
     }
   }
   for (const region of report?.excludedMatches ?? []) {
     if (region.startPosition === null || region.endPosition === null) continue
-    paint(region.startPosition, region.endPosition, 'excluded', EXCLUSION_LABELS[region.reason] ?? 'Excluded', true)
+    spans.push({ start: clamp(region.startPosition), end: clamp(region.endPosition), mark: 'excluded', comment: EXCLUSION_LABELS[region.reason] ?? 'Excluded from matching', rank: order++ })
   }
+  const boundaries = [...new Set([0, text.length, ...spans.flatMap((span) => [span.start, span.end])])].sort((a, b) => a - b)
   const pieces: Piece[] = []
-  let start = 0
-  for (let i = 1; i <= text.length; i += 1) {
-    if (i < text.length && marks[i]?.mark === marks[start]?.mark && marks[i]?.comment === marks[start]?.comment) continue
-    pieces.push({ text: text.slice(start, i), mark: marks[start]?.mark ?? null, comment: marks[start]?.comment ?? null })
-    start = i
+  for (let i = 0; i < boundaries.length - 1; i += 1) {
+    const from = boundaries[i]
+    const to = boundaries[i + 1]
+    if (to <= from) continue
+    let best: (typeof spans)[number] | null = null
+    for (const span of spans) {
+      if (span.start <= from && span.end >= to && (!best || span.rank < best.rank)) best = span
+    }
+    const last = pieces[pieces.length - 1]
+    if (last && last.mark === (best?.mark ?? null) && last.comment === (best?.comment ?? null)) last.text += text.slice(from, to)
+    else pieces.push({ text: text.slice(from, to), mark: best?.mark ?? null, comment: best?.comment ?? null })
   }
   return pieces
 }

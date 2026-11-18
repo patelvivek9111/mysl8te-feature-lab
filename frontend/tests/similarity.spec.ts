@@ -24,6 +24,9 @@ test('teacher sees matches and exclusions in the document and recalculates with 
   await expect(exact.first()).toHaveAttribute('title', /Exact match: Pride and Prejudice/);
   const bibliography = page.locator('[data-testid="document-text"] mark.excluded[title="Excluded bibliography"]');
   await expect(bibliography).toContainText('Austen, Jane');
+  await expect(bibliography).toHaveAttribute('aria-label', /^Excluded bibliography\. /);
+  await expect(bibliography).toHaveAttribute('tabindex', '0');
+  await expect(page.getByTestId('highlight')).toBeDisabled();
 
   try {
     await page.getByTestId('opt-exclude-bibliography').uncheck();
@@ -43,6 +46,7 @@ test('teacher sees matches and exclusions in the document and recalculates with 
 
   await page.getByTestId('layer-annotations').check();
   await expect(page.locator('[data-testid="document-text"] mark.excluded')).toHaveCount(0);
+  await expect(page.getByTestId('highlight')).toBeEnabled();
 });
 
 test('students can view the similarity overlay but cannot change matching options', async ({ page }) => {

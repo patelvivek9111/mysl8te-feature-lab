@@ -656,7 +656,7 @@ export function createApp() {
         res.status(400).json({ error: `${badFlag} must be true or false` });
         return;
       }
-      const threshold = body.smallMatchThreshold ?? 8;
+      const threshold = body.smallMatchThreshold === undefined ? 8 : body.smallMatchThreshold;
       if (!Number.isInteger(threshold) || threshold < 1 || threshold > 200) {
         res.status(400).json({ error: 'smallMatchThreshold must be a whole number from 1 to 200' });
         return;
